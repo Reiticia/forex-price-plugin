@@ -86,25 +86,25 @@ std::wstring FormatPercentage(const std::optional<double>& value)
     return stream.str();
 }
 
-std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options)
+std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options, int precision)
 {
-    const int precision = options.precision >= 0 ? options.precision : quote.precision;
+    const int effective = precision >= 0 ? precision : quote.precision;
     std::wstring result;
     bool first = true;
     ValueBuilder::Append(result, first, options.showBid, L"买",
-                         FormatNumber(quote.bid, precision));
+                         FormatNumber(quote.bid, effective));
     ValueBuilder::Append(result, first, options.showAsk, L"卖",
-                         FormatNumber(quote.ask, precision));
+                         FormatNumber(quote.ask, effective));
     ValueBuilder::Append(result, first, options.showMid, L"中",
-                         FormatNumber(quote.midpoint, precision));
+                         FormatNumber(quote.midpoint, effective));
     ValueBuilder::Append(result, first, options.showChange, L"涨跌",
                          FormatPercentage(quote.dailyChangePercent));
     return result;
 }
 
-std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& options)
+std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& options, int precision)
 {
-    const int precision = options.precision >= 0 ? options.precision : quote.precision;
+    const int effective = precision >= 0 ? precision : quote.precision;
     double primary = 0.0;
     bool hasPrimary = false;
     if (options.showMid)
@@ -123,7 +123,7 @@ std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& option
         hasPrimary = true;
     }
     std::wstring result;
-    if (hasPrimary) result = FormatNumber(primary, precision);
+    if (hasPrimary) result = FormatNumber(primary, effective);
     if (options.showChange)
     {
         if (!result.empty()) result += L' ';
@@ -132,9 +132,9 @@ std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& option
     return result;
 }
 
-std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options)
+std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options, int precision)
 {
-    const int precision = options.precision >= 0 ? options.precision : quote.precision;
+    const int effective = precision >= 0 ? precision : quote.precision;
     std::wstring result;
     bool first = true;
     auto append = [&](bool enabled, const wchar_t* label, const std::wstring& value) {
@@ -145,9 +145,9 @@ std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options
         result += L' ';
         result += value;
     };
-    append(options.showBid, L"买一", FormatNumber(quote.bid, precision));
-    append(options.showAsk, L"卖一", FormatNumber(quote.ask, precision));
-    append(options.showMid, L"中间价", FormatNumber(quote.midpoint, precision));
+    append(options.showBid, L"买一", FormatNumber(quote.bid, effective));
+    append(options.showAsk, L"卖一", FormatNumber(quote.ask, effective));
+    append(options.showMid, L"中间价", FormatNumber(quote.midpoint, effective));
     append(options.showChange, L"日涨跌", FormatPercentage(quote.dailyChangePercent));
     // 仅当至少显示一个字段时才添加描述前缀，避免产生"desc | "尾部悬空。
     if (!quote.description.empty() && !result.empty())
@@ -155,10 +155,10 @@ std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options
     return result;
 }
 
-std::wstring FormatQuoteSample(const DisplayOptions& options)
+std::wstring FormatQuoteSample(const DisplayOptions& options, int precision)
 {
-    const int precision = options.precision >= 0 ? options.precision : 5;
-    const std::wstring placeholder = FormatNumber(0.0, precision);
+    const int effective = precision >= 0 ? precision : 5;
+    const std::wstring placeholder = FormatNumber(0.0, effective);
     const std::wstring changePlaceholder = L"+0.00%";
     std::wstring result;
     bool first = true;

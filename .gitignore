@@ -1,13 +1,28 @@
-build*/
-.vs/
-.idea/
+/build*/
+/.vs/
+/.vscode/
+/.idea/
+/out/
 *.user
 *.suo
 *.VC.db
+*.VC.VC.opendb
 *.VC.opendb
+*.dll
+*.exp
+*.ilk
+*.lib
+*.obj
+*.pdb
+
+# 始终跟踪仓库内的 GitHub Actions 工作流。
+!/.github/
+!/.github/workflows/
+!/.github/workflows/*.yml
+
+# 本地运行配置与临时参考资料。
 FxPrice.ini
 .reference-*/
 *-search.json
 trafficmonitor-tree.json
-
 UI问题*.png

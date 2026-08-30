@@ -27,7 +27,8 @@ private:
     void UpdateSelected();
     void RemoveSelected();
     void Accept();
-    std::wstring ReadSymbol() const;
+    SymbolConfig ReadSymbolConfig() const;
+    int ReadPrecisionInput() const;
     int SelectedIndex() const;
     void SetStatus(const wchar_t* text);
 

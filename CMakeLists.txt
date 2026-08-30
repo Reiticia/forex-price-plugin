@@ -1,28 +1,37 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FxPricePlugin VERSION 0.3.0 LANGUAGES CXX)
+project(FxPricePlugin VERSION 0.4.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "FxPricePlugin 仅支持 Windows。")
 endif()
 
 add_library(FxPricePlugin SHARED
-    src/Config.cpp
-    src/dllmain.cpp
-    src/FxPricePlugin.cpp
     src/MarketData.cpp
-    src/OptionsWindow.cpp
+    src/FxPricePlugin.cpp
+    src/Config.cpp
     src/Quote.cpp
     src/BiquoteClient.cpp
+    src/OptionsWindow.cpp
+    src/dllmain.cpp
 )
+
 target_include_directories(FxPricePlugin PRIVATE src)
 target_compile_features(FxPricePlugin PRIVATE cxx_std_17)
-target_compile_definitions(FxPricePlugin PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(FxPricePlugin PRIVATE winhttp user32)
-set_target_properties(FxPricePlugin PROPERTIES PREFIX "" OUTPUT_NAME "FxPricePlugin")
+target_compile_definitions(FxPricePlugin PRIVATE
+    UNICODE
+    _UNICODE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+)
 if(MSVC)
     target_compile_options(FxPricePlugin PRIVATE /utf-8 /W4 /permissive- /EHsc)
 endif()
+target_link_libraries(FxPricePlugin PRIVATE winhttp user32)
+set_target_properties(FxPricePlugin PROPERTIES
+    OUTPUT_NAME "FxPricePlugin"
+    PREFIX ""
+)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -35,11 +44,16 @@ if(BUILD_TESTING)
     )
     target_include_directories(FxPriceTests PRIVATE src)
     target_compile_features(FxPriceTests PRIVATE cxx_std_17)
-    target_compile_definitions(FxPriceTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(FxPriceTests PRIVATE winhttp)
+    target_compile_definitions(FxPriceTests PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
     if(MSVC)
         target_compile_options(FxPriceTests PRIVATE /utf-8 /W4 /permissive- /EHsc)
     endif()
+    target_link_libraries(FxPriceTests PRIVATE winhttp)
     add_test(NAME FxPriceTests COMMAND FxPriceTests)
 
     add_executable(FxPriceLiveSmoke
@@ -75,10 +89,14 @@ if(BUILD_TESTING)
     add_executable(FxPricePluginSmoke tests/PluginSmoke.cpp)
     target_include_directories(FxPricePluginSmoke PRIVATE src)
     target_compile_features(FxPricePluginSmoke PRIVATE cxx_std_17)
-    target_compile_definitions(FxPricePluginSmoke PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(FxPricePluginSmoke PRIVATE
+        UNICODE
+        _UNICODE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+    )
     if(MSVC)
         target_compile_options(FxPricePluginSmoke PRIVATE /utf-8 /W4 /permissive- /EHsc)
     endif()
-    add_test(NAME FxPricePluginSmoke
-             COMMAND FxPricePluginSmoke $<TARGET_FILE:FxPricePlugin>)
+    add_test(NAME FxPricePluginSmoke COMMAND FxPricePluginSmoke $<TARGET_FILE:FxPricePlugin>)
 endif()

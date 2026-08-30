@@ -1,0 +1,211 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Resolve build metadata
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_version: ${{ steps.version.outputs.artifact_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve and validate version metadata
+        id: version
+        shell: pwsh
+        run: |
+          function Get-SingleVersion {
+            param(
+              [string]$Path,
+              [string]$Pattern,
+              [string]$Label
+            )
+
+            $results = @(Select-String -Path $Path -Pattern $Pattern)
+            if ($results.Count -ne 1) {
+              throw "Expected exactly one active $Label version in $Path, found $($results.Count)."
+            }
+            return $results[0].Matches[0].Groups[1].Value
+          }
+
+          $cmakeVersion = Get-SingleVersion `
+            -Path CMakeLists.txt `
+            -Pattern '^\s*project\s*\(\s*FxPricePlugin\s+VERSION\s+(\d+\.\d+\.\d+)\s+LANGUAGES\s+CXX\s*\)\s*$' `
+            -Label 'CMake project'
+
+          $pluginVersion = Get-SingleVersion `
+            -Path src/FxPricePlugin.cpp `
+            -Pattern '^\s*case\s+TMI_VERSION:\s*return\s+L"(\d+\.\d+\.\d+)";\s*$' `
+            -Label 'plugin metadata'
+          if ($pluginVersion -ne $cmakeVersion) {
+            throw "Plugin version $pluginVersion does not match CMake version $cmakeVersion."
+          }
+
+          $userAgentVersion = Get-SingleVersion `
+            -Path src/BiquoteClient.cpp `
+            -Pattern '^\s*InternetHandle\s+session\s*\(WinHttpOpen\(L"TrafficMonitor FxPricePlugin/(\d+\.\d+\.\d+)",\s*$' `
+            -Label 'User-Agent'
+          if ($userAgentVersion -ne $cmakeVersion) {
+            throw "User-Agent version $userAgentVersion does not match CMake version $cmakeVersion."
+          }
+
+          $escapedVersion = [regex]::Escape($cmakeVersion)
+          $versionHeading = "^##\s+\[?v?$escapedVersion\]?(?:\s+-.*)?\s*$"
+          $changelogMatches = @(Select-String -Path CHANGELOG.md -Pattern $versionHeading)
+          if ($changelogMatches.Count -ne 1) {
+            throw "Expected exactly one CHANGELOG.md section for version $cmakeVersion, found $($changelogMatches.Count)."
+          }
+
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -notmatch '^v\d+\.\d+\.\d+$') {
+              throw "Release tag must use vX.Y.Z format, got: $env:GITHUB_REF_NAME"
+            }
+
+            $tagVersion = $env:GITHUB_REF_NAME.Substring(1)
+            if ($tagVersion -ne $cmakeVersion) {
+              throw "Tag version $tagVersion does not match CMake version $cmakeVersion."
+            }
+            $artifactVersion = $tagVersion
+          }
+          else {
+            $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+            $artifactVersion = "$cmakeVersion-$shortSha"
+          }
+
+          "artifact_version=$artifactVersion" >> $env:GITHUB_OUTPUT
+          Write-Host "Artifact version: $artifactVersion"
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: metadata
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            label: x64
+          - architecture: Win32
+            label: win32
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -S . -B build -A ${{ matrix.architecture }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Prepare DLL
+        shell: pwsh
+        run: |
+          $source = Join-Path $PWD 'build/Release/FxPricePlugin.dll'
+          if (-not (Test-Path -LiteralPath $source)) {
+            throw "Build output not found: $source"
+          }
+
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          $fileName = 'FxPricePlugin-${{ needs.metadata.outputs.artifact_version }}-${{ matrix.label }}.dll'
+          Copy-Item -LiteralPath $source -Destination (Join-Path $PWD "dist/$fileName")
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FxPricePlugin-${{ matrix.label }}
+          path: dist/*.dll
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - metadata
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download DLL artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: FxPricePlugin-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create SHA-256 checksums
+        shell: bash
+        run: |
+          cd release-assets
+          sha256sum ./*.dll > SHA256SUMS.txt
+
+      - name: Extract release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          $version = '${{ needs.metadata.outputs.artifact_version }}'
+          $lines = @(Get-Content -LiteralPath CHANGELOG.md)
+          $escapedVersion = [regex]::Escape($version)
+          $versionHeading = "^##\s+\[?v?$escapedVersion\]?(?:\s+-.*)?\s*$"
+
+          $start = -1
+          for ($index = 0; $index -lt $lines.Count; $index++) {
+            if ($lines[$index] -match $versionHeading) {
+              $start = $index + 1
+              break
+            }
+          }
+          if ($start -lt 0) {
+            throw "CHANGELOG.md does not contain a section for version $version."
+          }
+
+          $end = $lines.Count
+          for ($index = $start; $index -lt $lines.Count; $index++) {
+            if ($lines[$index] -match '^##\s+') {
+              $end = $index
+              break
+            }
+          }
+
+          $notes = [System.Collections.Generic.List[string]]::new()
+          for ($index = $start; $index -lt $end; $index++) {
+            $notes.Add($lines[$index])
+          }
+          while ($notes.Count -gt 0 -and [string]::IsNullOrWhiteSpace($notes[0])) {
+            $notes.RemoveAt(0)
+          }
+          while ($notes.Count -gt 0 -and [string]::IsNullOrWhiteSpace($notes[$notes.Count - 1])) {
+            $notes.RemoveAt($notes.Count - 1)
+          }
+          if ($notes.Count -eq 0) {
+            throw "The CHANGELOG.md section for version $version is empty."
+          }
+
+          $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
+          Write-Host "Release notes for $version:"
+          $notes | ForEach-Object { Write-Host "  $_" }
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FxPricePlugin ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            release-assets/*.dll
+            release-assets/SHA256SUMS.txt

@@ -33,28 +33,18 @@ std::wstring Utf8ToWide(const std::string& value)
 Settings NormalizeSettings(Settings settings)
 {
     settings.refreshSeconds = std::clamp(settings.refreshSeconds, 2, 300);
-    std::vector<std::wstring> normalized;
-    for (const std::wstring& raw : settings.symbols)
-    {
-        const std::wstring symbol = NormalizeSymbol(raw);
-        if (!IsValidSymbol(symbol) ||
-            std::find(normalized.begin(), normalized.end(), symbol) != normalized.end())
-            continue;
-        normalized.push_back(symbol);
-        if (normalized.size() == kMaxSymbols) break;
-    }
-    if (normalized.empty()) normalized.push_back(L"EURUSD");
-    settings.symbols = std::move(normalized);
+    settings.symbols = NormalizeSymbols(settings.symbols);
+    if (settings.symbols.empty()) settings.symbols.push_back(SymbolConfig{});
     return settings;
 }
 
 // 汇总行示例文本：主价格占位 + （勾选时的）涨跌幅占位，精度随配置。
-std::wstring SummarySample(const DisplayOptions& options)
+std::wstring SummarySample(const DisplayOptions& options, int precision)
 {
-    const int precision = options.precision >= 0 ? options.precision : 5;
+    const int effective = precision >= 0 ? precision : 5;
     std::wstring result;
     if (options.showMid || options.showBid || options.showAsk)
-        result = FormatNumber(0.0, precision);
+        result = FormatNumber(0.0, effective);
     if (options.showChange)
     {
         if (!result.empty()) result += L' ';
@@ -85,8 +75,8 @@ FxPricePlugin::FxPricePlugin()
 }
 
 // 函数内静态单例的析构通常不会执行（宿主 FreeLibrary 不运行静态对象
-// 析构）；卸载安全由 DLL_PROCESS_DETACH 的 Shutdown() 与工作线程的
-// 模块固定（RefreshWorker）共同保证。此处保留析构仅作防御。
+// 析构）；卸载安全由 DLL_PROCESS_DETACH 的 Shutdown() 与启动线程前
+// 获取的普通模块引用共同保证。此处保留析构仅作防御。
 FxPricePlugin::~FxPricePlugin()
 {
     shuttingDown_ = true;
@@ -143,7 +133,7 @@ const wchar_t* FxPricePlugin::GetInfo(PluginInfoIndex index)
         return L"无需账户或 API Key，显示外汇买一价、卖一价、中间价和日涨跌幅";
     case TMI_AUTHOR: return L"Reiticia";
     case TMI_COPYRIGHT: return L"Copyright (C) 2026";
-    case TMI_VERSION: return L"0.3.0";
+    case TMI_VERSION: return L"0.4.0";
     case TMI_URL: return L"https://github.com/Reiticia/fx-price-plugin";
     default: return L"";
     }
@@ -189,12 +179,13 @@ void FxPricePlugin::ApplySettings(Settings settings)
         for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
         {
             PriceItem& item = items_[index + 1];
-            const std::wstring display = DisplaySymbol(settings_.symbols[index]);
+            const std::wstring display = DisplaySymbol(settings_.symbols[index].code);
             item.name_ = L"外汇行情 " + display;
             item.label_ = display + L": ";
             item.value_ = L"--";
             item.summary_ = L"--";
-            item.sample_ = FormatQuoteSample(settings_.display);
+            item.sample_ = FormatQuoteSample(settings_.display,
+                                             settings_.symbols[index].precision);
             item.detail_ = L"等待行情";
         }
         items_[0].value_ = L"等待行情";
@@ -220,12 +211,12 @@ void FxPricePlugin::ApplyPendingResult()
     std::lock_guard<std::mutex> lock(settingsMutex_);
     for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
     {
-        const std::string symbol = WideToAscii(settings_.symbols[index]);
+        const std::string symbol = WideToAscii(settings_.symbols[index].code);
         const auto found = result.quotes.find(symbol);
         const Quote* quote = found == result.quotes.end() ? nullptr : &found->second;
         const std::wstring error = result.success
             ? L"biquote 未返回该标的" : requestError;
-        UpdateItem(index, quote, error);
+        UpdateItem(index, quote, error, settings_.symbols[index].precision);
     }
     RebuildAggregateAndTooltip();
 }
@@ -247,27 +238,41 @@ void FxPricePlugin::StartRefresh(bool force)
     nextRefresh_ = now + std::chrono::seconds(snapshot.refreshSeconds);
     const unsigned long long generation = generation_.load();
     workerRunning_ = true;
-    worker_ = std::thread(&FxPricePlugin::RefreshWorker, this,
-                          std::move(snapshot), generation);
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                            reinterpret_cast<LPCWSTR>(&g_moduleInstance), &module))
+    {
+        workerRunning_ = false;
+        nextRefresh_ = std::chrono::steady_clock::time_point{};
+        return;
+    }
+    try
+    {
+        worker_ = std::thread(&FxPricePlugin::RefreshWorker, this,
+                              std::move(snapshot), generation, module);
+    }
+    catch (...)
+    {
+        FreeLibrary(module);
+        workerRunning_ = false;
+        nextRefresh_ = std::chrono::steady_clock::time_point{};
+    }
 }
 
-void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generation)
+void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generation,
+                                  HMODULE module)
 {
-    // 固定本模块引用：宿主可能在后台请求期间卸载 DLL，而静态单例析构
-    // 不会执行、DllMain 也无法安全 join 本线程。固定后，即使宿主调用
-    // FreeLibrary，模块也会保持加载，直到本线程释放固定并退出。
-    HMODULE module = nullptr;
-    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                           GET_MODULE_HANDLE_EX_FLAG_PIN,
-                       reinterpret_cast<LPCWSTR>(&g_moduleInstance), &module);
-
     PendingResult result;
     result.generation = generation;
     try
     {
+        std::vector<std::wstring> codes;
+        codes.reserve(settings.symbols.size());
+        for (const SymbolConfig& symbol : settings.symbols)
+            codes.push_back(symbol.code);
         WinHttpTransport transport;
         BiquoteClient client(transport);
-        result.success = client.Fetch(settings.symbols, result.quotes, result.error);
+        result.success = client.Fetch(codes, result.quotes, result.error);
     }
     catch (const std::exception& exception)
     {
@@ -285,12 +290,11 @@ void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generati
         hasPending_ = true;
     }
     workerRunning_ = false;
-    if (module) FreeLibraryAndExitThread(module, 0);
-    // FreeLibraryAndExitThread 不返回；仅在未取得模块固定时才执行到这里。
+    FreeLibraryAndExitThread(module, 0);
 }
 
 void FxPricePlugin::UpdateItem(std::size_t index, const Quote* quote,
-                               const std::wstring& error)
+                               const std::wstring& error, int precision)
 {
     PriceItem& item = items_[index + 1];
     if (!quote)
@@ -302,9 +306,9 @@ void FxPricePlugin::UpdateItem(std::size_t index, const Quote* quote,
     }
 
     const DisplayOptions& options = settings_.display;
-    item.value_ = FormatQuoteValue(*quote, options);
-    item.summary_ = FormatQuoteSummary(*quote, options);
-    item.detail_ = FormatQuoteDetail(*quote, options);
+    item.value_ = FormatQuoteValue(*quote, options, precision);
+    item.summary_ = FormatQuoteSummary(*quote, options, precision);
+    item.detail_ = FormatQuoteDetail(*quote, options, precision);
     if (item.value_.empty()) item.value_ = L"--";
     if (item.summary_.empty()) item.summary_ = L"--";
     if (item.detail_.empty()) item.detail_ = L"--";
@@ -319,14 +323,16 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
     for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
     {
         const PriceItem& item = items_[index + 1];
-        const std::wstring display = DisplaySymbol(settings_.symbols[index]);
+        const std::wstring display = DisplaySymbol(settings_.symbols[index].code);
         if (index != 0)
         {
             aggregate.value_ += L" | ";
             aggregate.sample_ += L" | ";
         }
         aggregate.value_ += display + L" " + item.summary_;
-        aggregate.sample_ += display + L" " + SummarySample(settings_.display);
+        aggregate.sample_ += display + L" " +
+                             SummarySample(settings_.display,
+                                           settings_.symbols[index].precision);
         tooltip_ += L"\n" + display + L"：" + item.detail_;
     }
     tooltip_ += L"\n涨跌幅为相对前收的日涨跌，并非严格滚动 24 小时。";

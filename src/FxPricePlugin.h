@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <Windows.h>
 
 namespace fxprice
 {
@@ -71,8 +72,9 @@ private:
     void ApplySettings(Settings settings);
     void ApplyPendingResult();
     void StartRefresh(bool force);
-    void RefreshWorker(Settings settings, unsigned long long generation);
-    void UpdateItem(std::size_t index, const Quote* quote, const std::wstring& error);
+    void RefreshWorker(Settings settings, unsigned long long generation, HMODULE module);
+    void UpdateItem(std::size_t index, const Quote* quote, const std::wstring& error,
+                    int precision);
     void RebuildAggregateAndTooltip();
 
     std::array<PriceItem, kMaxSymbols + 1> items_;

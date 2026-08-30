@@ -8,15 +8,21 @@ namespace fxprice
 {
 constexpr std::size_t kMaxSymbols = 8;
 
-// 控制任务栏与工具提示显示哪些字段，以及小数位精度。四项开关注册默认全开。
+// 单个外汇标的：代码 + 该标的独立的价格小数位数（-1 自动推断，0..10 固定）。
+struct SymbolConfig
+{
+    std::wstring code{L"EURUSD"};
+    // 小数位数：-1 表示自动（按行情价格推断）；0..10 表示固定显示位数。
+    int precision{-1};
+};
+
+// 全局显示字段开关（作用于所有标的），不包含小数位数（后者按标的独立）。
 struct DisplayOptions
 {
     bool showBid{true};
     bool showAsk{true};
     bool showMid{true};
     bool showChange{true};
-    // 小数位数：-1 表示自动（按行情价格推断）；0..10 表示固定显示位数。
-    int precision{-1};
 
     bool none() const
     {
@@ -27,11 +33,11 @@ struct DisplayOptions
 struct Settings
 {
     int refreshSeconds{10};
-    std::vector<std::wstring> symbols{L"EURUSD"};
+    std::vector<SymbolConfig> symbols{{}};
     DisplayOptions display;
 };
 
-std::vector<std::wstring> NormalizeSymbols(const std::vector<std::wstring>& values);
+std::vector<SymbolConfig> NormalizeSymbols(const std::vector<SymbolConfig>& values);
 
 class ConfigStore
 {

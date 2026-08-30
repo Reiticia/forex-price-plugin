@@ -55,16 +55,23 @@ int main()
     Check(fxprice::IsValidSymbol(L"USDJPY"), "接受六位外汇标的");
     Check(!fxprice::IsValidSymbol(L"EUR_USD"), "拒绝未规范化标的");
 
-    const std::vector<std::wstring> normalized = fxprice::NormalizeSymbols(
-        {L"EURUSD", L"eur/usd", L"EURUSD", L"GBP-USD"});
-    Check(normalized == std::vector<std::wstring>{L"EURUSD", L"GBPUSD"},
+    const std::vector<fxprice::SymbolConfig> normalized = fxprice::NormalizeSymbols(
+        {fxprice::SymbolConfig{L"EURUSD"}, fxprice::SymbolConfig{L"eur/usd"},
+         fxprice::SymbolConfig{L"EURUSD"}, fxprice::SymbolConfig{L"GBP-USD"}});
+    Check(normalized.size() == 2 && normalized[0].code == L"EURUSD" &&
+              normalized[1].code == L"GBPUSD",
           "规范化并去重标的列表");
-    Check(fxprice::NormalizeSymbols({L"EURUSD", L"GBPUSD", L"USDJPY", L"AUDUSD",
-                                     L"USDCAD", L"USDCHF", L"NZDUSD", L"EURGBP",
-                                     L"EURJPY", L"GBPJPY"})
+    Check(fxprice::NormalizeSymbols(
+              {fxprice::SymbolConfig{L"EURUSD"}, fxprice::SymbolConfig{L"GBPUSD"},
+               fxprice::SymbolConfig{L"USDJPY"}, fxprice::SymbolConfig{L"AUDUSD"},
+               fxprice::SymbolConfig{L"USDCAD"}, fxprice::SymbolConfig{L"USDCHF"},
+               fxprice::SymbolConfig{L"NZDUSD"}, fxprice::SymbolConfig{L"EURGBP"},
+               fxprice::SymbolConfig{L"EURJPY"}, fxprice::SymbolConfig{L"GBPJPY"}})
               .size() == 8,
           "标的列表最多保留 8 个");
-    Check(fxprice::NormalizeSymbols({L"!!", L"", L"EUR"}).empty(),
+    Check(fxprice::NormalizeSymbols(
+              {fxprice::SymbolConfig{L"!!"}, fxprice::SymbolConfig{L""},
+               fxprice::SymbolConfig{L"EUR"}}).empty(),
           "全部无效时返回空列表");
 
     const std::string query = fxprice::BuildLatestQuery({L"EURUSD", L"USDJPY"});
@@ -111,13 +118,13 @@ int main()
     Check(quotes["EURUSD"].description == "Euro vs US Dollar",
           "读取标的描述");
     fxprice::DisplayOptions displayAll;
-    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], displayAll) ==
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], displayAll, -1) ==
               L"买:1.15823 卖:1.15829 中:1.15826 涨跌:-0.61%",
           "格式化完整买卖行情");
-    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], displayAll) ==
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], displayAll, -1) ==
               L"1.15826 -0.61%",
           "格式化汇总行情");
-    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], displayAll).find(L"Euro vs US Dollar") !=
+    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], displayAll, -1).find(L"Euro vs US Dollar") !=
               std::wstring::npos,
           "详情包含标的描述");
 
@@ -125,20 +132,21 @@ int main()
     fxprice::DisplayOptions partial;
     partial.showBid = false;
     partial.showAsk = false;
-    partial.precision = 2;
-    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], partial) ==
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], partial, 2) ==
               L"中:1.16 涨跌:-0.61%",
           "按勾选字段与固定精度格式化");
-    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], partial) == L"1.16 -0.61%",
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], partial, 2) == L"1.16 -0.61%",
           "汇总仅含中间价与涨跌幅");
     // 仅显示买价，保留三位小数。
     fxprice::DisplayOptions bidOnly;
     bidOnly.showAsk = false;
     bidOnly.showMid = false;
     bidOnly.showChange = false;
-    bidOnly.precision = 3;
-    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], bidOnly) == L"买:1.158",
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], bidOnly, 3) == L"买:1.158",
           "仅显示买价并按三位小数格式化");
+    // 固定 0 位（整数显示）。
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], bidOnly, 0) == L"买:1",
+          "固定 0 位时价格取整显示");
 
     // 详情尾部悬空分隔：全部取消勾选时为空，仅显示买价时以买价结尾。
     fxprice::DisplayOptions detailOff;
@@ -146,14 +154,14 @@ int main()
     detailOff.showAsk = false;
     detailOff.showMid = false;
     detailOff.showChange = false;
-    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], detailOff).empty(),
+    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], detailOff, -1).empty(),
           "全部取消勾选时详情为空");
     fxprice::DisplayOptions detailOne;
     detailOne.showAsk = false;
     detailOne.showMid = false;
     detailOne.showChange = false;
     const std::wstring detailText =
-        fxprice::FormatQuoteDetail(quotes["EURUSD"], detailOne);
+        fxprice::FormatQuoteDetail(quotes["EURUSD"], detailOne, -1);
     Check(detailText.find(L"Euro vs US Dollar |") != std::wstring::npos &&
               detailText.size() >= 7 &&
               detailText.compare(detailText.size() - 7, 7, L"1.15823") == 0,
@@ -201,25 +209,61 @@ int main()
 
     wchar_t temporaryPath[MAX_PATH]{};
     GetTempPathW(MAX_PATH, temporaryPath);
-    const std::filesystem::path configDirectory =
-        std::filesystem::path(temporaryPath) / L"FxPricePluginTests";
+    // 使用进程 ID 隔离测试目录，避免 x64 与 Win32 并行验证时互相删除配置。
+    const std::filesystem::path testRoot =
+        std::filesystem::path(temporaryPath) /
+        (L"FxPricePluginTests-" + std::to_wstring(GetCurrentProcessId()));
+    std::filesystem::remove_all(testRoot);
+    const std::filesystem::path configDirectory = testRoot / L"Current";
     std::filesystem::create_directories(configDirectory);
     fxprice::ConfigStore config;
     config.SetDirectory(configDirectory.wstring());
     fxprice::Settings settings;
     settings.refreshSeconds = 17;
-    settings.symbols = {L"EURUSD", L"USDJPY"};
+    settings.symbols = {fxprice::SymbolConfig{L"EURUSD", 4},
+                        fxprice::SymbolConfig{L"USDJPY", -1}};
     settings.display.showBid = false;
     settings.display.showChange = false;
-    settings.display.precision = 4;
     Check(config.Save(settings), "保存无凭据插件配置");
     const fxprice::Settings loaded = config.Load();
     Check(loaded.refreshSeconds == 17, "读取刷新间隔");
-    Check(loaded.symbols == settings.symbols, "读取全部外汇标的");
+    Check(loaded.symbols.size() == 2 &&
+              loaded.symbols[0].code == L"EURUSD" &&
+              loaded.symbols[0].precision == 4 &&
+              loaded.symbols[1].code == L"USDJPY" &&
+              loaded.symbols[1].precision == -1,
+          "读取每标的代码与独立小数位");
     Check(!loaded.display.showBid && loaded.display.showAsk && loaded.display.showMid &&
               !loaded.display.showChange,
           "读取显示开关");
-    Check(loaded.display.precision == 4, "读取固定小数位");
+    // 手写脏值回退自动，而不是被解析为固定 0 位。
+    WritePrivateProfileStringW(L"Symbols", L"Precision0", L"abc",
+                               config.Path().c_str());
+    const fxprice::Settings dirty = config.Load();
+    Check(dirty.symbols[0].precision == -1 &&
+              dirty.symbols[1].precision == -1,
+          "脏精度键回退自动且不影响其他标的");
+    // 旧版只有 General.DisplayPrecision 时，迁移为所有交易对的回退精度。
+    const std::filesystem::path legacyDirectory = testRoot / L"Legacy";
+    std::filesystem::create_directories(legacyDirectory);
+    fxprice::ConfigStore legacyConfig;
+    legacyConfig.SetDirectory(legacyDirectory.wstring());
+    WritePrivateProfileStringW(L"General", L"Count", L"2",
+                               legacyConfig.Path().c_str());
+    WritePrivateProfileStringW(L"General", L"DisplayPrecision", L"3",
+                               legacyConfig.Path().c_str());
+    WritePrivateProfileStringW(L"Symbols", L"Symbol0", L"EURUSD",
+                               legacyConfig.Path().c_str());
+    WritePrivateProfileStringW(L"Symbols", L"Symbol1", L"USDJPY",
+                               legacyConfig.Path().c_str());
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, legacyConfig.Path().c_str());
+    const fxprice::Settings migrated = legacyConfig.Load();
+    Check(migrated.symbols.size() == 2 &&
+              migrated.symbols[0].precision == 3 &&
+              migrated.symbols[1].precision == 3,
+          "旧版 DisplayPrecision 迁移为交易对精度回退");
+    std::filesystem::remove_all(legacyDirectory);
+
     std::ifstream configFile(std::filesystem::path(config.Path()), std::ios::binary);
     const std::string configText((std::istreambuf_iterator<char>(configFile)),
                                  std::istreambuf_iterator<char>());
@@ -227,7 +271,7 @@ int main()
               configText.find("AccountId") == std::string::npos,
           "配置不包含账户或令牌字段");
     configFile.close();
-    std::filesystem::remove_all(configDirectory);
+    std::filesystem::remove_all(testRoot);
 
     if (failures == 0) std::cout << "All tests passed\n";
     return failures == 0 ? 0 : 1;

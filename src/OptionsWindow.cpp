@@ -211,12 +211,20 @@ void OptionsWindow::CreateControls()
     SendMessageW(source, CB_SETCURSEL, 0, 0);
     EnableWindow(source, FALSE);
 
-    AddControl(window_, L"STATIC", L"刷新间隔", 0, 18, 268, kLabelWidth, 20, -1);
+    // "小数位数"作用于当前选中交易对：留空自动推断，填 0–10 固定显示位数。
+    AddControl(window_, L"STATIC", L"小数位数", 0, 18, 268, kLabelWidth, 20, -1);
+    precision_ = AddControl(window_, L"EDIT", L"",
+                            WS_BORDER | WS_TABSTOP | ES_NUMBER,
+                            94, 264, 44, 25, kPrecisionEdit);
+    SendMessageW(precision_, EM_SETLIMITTEXT, 4, 0);
+    AddControl(window_, L"STATIC", L"留空自动；0–10", 0, 148, 268, 100, 20, -1);
+
+    AddControl(window_, L"STATIC", L"刷新间隔", 0, 258, 268, 72, 20, -1);
     refresh_ = AddControl(window_, L"EDIT",
                           std::to_wstring(draft_.refreshSeconds).c_str(),
                           WS_BORDER | WS_TABSTOP | ES_NUMBER,
-                          94, 264, 70, 25, kRefreshEdit);
-    AddControl(window_, L"STATIC", L"秒（2–300）", 0, 170, 268, 110, 20, -1);
+                          334, 264, 70, 25, kRefreshEdit);
+    AddControl(window_, L"STATIC", L"秒（2–300）", 0, 410, 268, 100, 20, -1);
 
     // "显示内容"改为可勾选的四个字段，逐项独立控制。
     AddControl(window_, L"STATIC", L"显示内容", 0, 18, 302, kLabelWidth, 20, -1);
@@ -237,20 +245,9 @@ void OptionsWindow::CreateControls()
     SendMessageW(showMid_, BM_SETCHECK, draft_.display.showMid ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(showChange_, BM_SETCHECK, draft_.display.showChange ? BST_CHECKED : BST_UNCHECKED, 0);
 
-    // "小数位数"：留空自动推断，填 0–10 固定显示位数。
-    AddControl(window_, L"STATIC", L"小数位数", 0, 18, 336, kLabelWidth, 20, -1);
-    precision_ = AddControl(window_, L"EDIT", L"",
-                            WS_BORDER | WS_TABSTOP | ES_NUMBER,
-                            94, 332, 44, 25, kPrecisionEdit);
-    if (draft_.display.precision >= 0)
-        SetWindowTextW(precision_, std::to_wstring(draft_.display.precision).c_str());
-    SendMessageW(precision_, EM_SETLIMITTEXT, 4, 0);
-    AddControl(window_, L"STATIC", L"留空自动；0–10 固定",
-               0, 148, 336, 160, 20, -1);
-
-    AddControl(window_, L"STATIC", L"涨跌口径", 0, 18, 362, kLabelWidth, 20, -1);
+    AddControl(window_, L"STATIC", L"涨跌口径", 0, 18, 332, kLabelWidth, 20, -1);
     AddControl(window_, L"STATIC", L"相对前收，非严格滚动 24 小时",
-               0, 94, 362, 400, 20, -1);
+               0, 94, 332, 400, 20, -1);
 
     AddControl(window_, L"BUTTON", L"添加新标的",
                WS_TABSTOP | BS_PUSHBUTTON, 530, 232, 112, 27, kAddButton);
@@ -275,9 +272,9 @@ void OptionsWindow::CreateControls()
 void OptionsWindow::RefreshList(int selection)
 {
     SendMessageW(list_, LB_RESETCONTENT, 0, 0);
-    for (const std::wstring& symbol : draft_.symbols)
+    for (const SymbolConfig& symbol : draft_.symbols)
     {
-        const std::wstring caption = DisplaySymbol(symbol) +
+        const std::wstring caption = DisplaySymbol(symbol.code) +
                                      L"    biquote.io（无 Key）";
         SendMessageW(list_, LB_ADDSTRING, 0,
                      reinterpret_cast<LPARAM>(caption.c_str()));
@@ -298,28 +295,55 @@ void OptionsWindow::LoadSelection()
 {
     const int index = SelectedIndex();
     if (index < 0 || index >= static_cast<int>(draft_.symbols.size())) return;
-    SetWindowTextW(symbol_, DisplaySymbol(draft_.symbols[static_cast<std::size_t>(index)]).c_str());
+    const SymbolConfig& symbol = draft_.symbols[static_cast<std::size_t>(index)];
+    SetWindowTextW(symbol_, DisplaySymbol(symbol.code).c_str());
+    if (symbol.precision >= 0)
+        SetWindowTextW(precision_, std::to_wstring(symbol.precision).c_str());
+    else
+        SetWindowTextW(precision_, L"");
     SetStatus(L"修改后点击“更新选中项”；新增交易对请点击“添加新标的”。");
 }
 
-std::wstring OptionsWindow::ReadSymbol() const
+int OptionsWindow::ReadPrecisionInput() const
+{
+    std::array<wchar_t, 8> precisionText{};
+    GetWindowTextW(precision_, precisionText.data(),
+                   static_cast<int>(precisionText.size()));
+    if (precisionText[0] == L'\0') return -1; // 留空 = 自动推断
+    wchar_t* end = nullptr;
+    const long value = std::wcstol(precisionText.data(), &end, 10);
+    if (end == precisionText.data() || *end != L'\0' || value < 0 || value > 10)
+        return -2; // 非法输入
+    return static_cast<int>(value);
+}
+
+SymbolConfig OptionsWindow::ReadSymbolConfig() const
 {
     std::array<wchar_t, 32> value{};
     GetWindowTextW(symbol_, value.data(), static_cast<int>(value.size()));
-    return NormalizeSymbol(value.data());
+    return {NormalizeSymbol(value.data()), ReadPrecisionInput()};
 }
 
 void OptionsWindow::AddNew()
 {
-    const std::wstring symbol = ReadSymbol();
-    if (!IsValidSymbol(symbol))
+    const SymbolConfig symbol = ReadSymbolConfig();
+    if (!IsValidSymbol(symbol.code))
     {
         SetStatus(L"交易对格式无效：请输入两个三位货币代码，例如 EUR/USD。 ");
         MessageBeep(MB_ICONWARNING);
         return;
     }
-    if (std::find(draft_.symbols.begin(), draft_.symbols.end(), symbol) !=
-        draft_.symbols.end())
+    if (symbol.precision == -2)
+    {
+        SetStatus(L"小数位数必须是 0 到 10 之间的整数，或留空为自动判断。 ");
+        SetFocus(precision_);
+        MessageBeep(MB_ICONWARNING);
+        return;
+    }
+    if (std::find_if(draft_.symbols.begin(), draft_.symbols.end(),
+                     [&](const SymbolConfig& existing) {
+                         return existing.code == symbol.code;
+                     }) != draft_.symbols.end())
     {
         SetStatus(L"该交易对已经在监控列表中。 ");
         MessageBeep(MB_ICONWARNING);
@@ -345,14 +369,24 @@ void OptionsWindow::UpdateSelected()
         MessageBeep(MB_ICONWARNING);
         return;
     }
-    const std::wstring symbol = ReadSymbol();
-    if (!IsValidSymbol(symbol))
+    const SymbolConfig symbol = ReadSymbolConfig();
+    if (!IsValidSymbol(symbol.code))
     {
         SetStatus(L"交易对格式无效：请输入两个三位货币代码，例如 EUR/USD。 ");
         MessageBeep(MB_ICONWARNING);
         return;
     }
-    const auto duplicate = std::find(draft_.symbols.begin(), draft_.symbols.end(), symbol);
+    if (symbol.precision == -2)
+    {
+        SetStatus(L"小数位数必须是 0 到 10 之间的整数，或留空为自动判断。 ");
+        SetFocus(precision_);
+        MessageBeep(MB_ICONWARNING);
+        return;
+    }
+    const auto duplicate = std::find_if(draft_.symbols.begin(), draft_.symbols.end(),
+                                        [&](const SymbolConfig& existing) {
+                                            return existing.code == symbol.code;
+                                        });
     if (duplicate != draft_.symbols.end() &&
         duplicate != draft_.symbols.begin() + selected)
     {
@@ -378,7 +412,11 @@ void OptionsWindow::RemoveSelected()
     const int next = draft_.symbols.empty()
         ? -1 : (std::min)(selected, static_cast<int>(draft_.symbols.size() - 1));
     RefreshList(next);
-    if (next < 0) SetWindowTextW(symbol_, L"");
+    if (next < 0)
+    {
+        SetWindowTextW(symbol_, L"");
+        SetWindowTextW(precision_, L"");
+    }
     SetStatus(L"已从列表移除；点击“确定”后生效。 ");
 }
 
@@ -412,24 +450,6 @@ void OptionsWindow::Accept()
         SendMessageW(showMid_, BM_GETCHECK, 0, 0) == BST_CHECKED;
     draft_.display.showChange =
         SendMessageW(showChange_, BM_GETCHECK, 0, 0) == BST_CHECKED;
-
-    std::array<wchar_t, 8> precisionText{};
-    GetWindowTextW(precision_, precisionText.data(),
-                   static_cast<int>(precisionText.size()));
-    draft_.display.precision = -1; // 默认自动推断
-    wchar_t* precisionEnd = nullptr;
-    const long precisionValue = std::wcstol(precisionText.data(), &precisionEnd, 10);
-    if (precisionText[0] != L'\0' &&
-        (precisionEnd == precisionText.data() || *precisionEnd != L'\0' ||
-         precisionValue < 0 || precisionValue > 10))
-    {
-        SetStatus(L"小数位数必须是 0 到 10 之间的整数，或留空为自动判断。 ");
-        SetFocus(precision_);
-        MessageBeep(MB_ICONWARNING);
-        return;
-    }
-    if (precisionText[0] != L'\0')
-        draft_.display.precision = static_cast<int>(precisionValue);
 
     accepted_ = true;
     DestroyWindow(window_);
