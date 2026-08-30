@@ -110,14 +110,35 @@ int main()
           "读取日涨跌幅");
     Check(quotes["EURUSD"].description == "Euro vs US Dollar",
           "读取标的描述");
-    Check(fxprice::FormatQuoteValue(quotes["EURUSD"]) ==
-              L"买 1.15823 卖 1.15829 中 1.15826 -0.61%",
+    fxprice::DisplayOptions displayAll;
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], displayAll) ==
+              L"买:1.15823 卖:1.15829 中:1.15826 涨跌:-0.61%",
           "格式化完整买卖行情");
-    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"]) == L"1.15826 -0.61%",
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], displayAll) ==
+              L"1.15826 -0.61%",
           "格式化汇总行情");
-    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"]).find(L"Euro vs US Dollar") !=
+    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], displayAll).find(L"Euro vs US Dollar") !=
               std::wstring::npos,
           "详情包含标的描述");
+
+    // 仅显示中间价与涨跌幅，并固定两位小数。
+    fxprice::DisplayOptions partial;
+    partial.showBid = false;
+    partial.showAsk = false;
+    partial.precision = 2;
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], partial) ==
+              L"中:1.16 涨跌:-0.61%",
+          "按勾选字段与固定精度格式化");
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], partial) == L"1.16 -0.61%",
+          "汇总仅含中间价与涨跌幅");
+    // 仅显示买价，保留三位小数。
+    fxprice::DisplayOptions bidOnly;
+    bidOnly.showAsk = false;
+    bidOnly.showMid = false;
+    bidOnly.showChange = false;
+    bidOnly.precision = 3;
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], bidOnly) == L"买:1.158",
+          "仅显示买价并按三位小数格式化");
 
     const std::string noMid = R"({"EURUSD":{"symbol":"EURUSD","bid":1.10,"ask":1.12,
         "dayDiffPercent":0.5,"description":"Euro vs US Dollar"}})";
@@ -169,10 +190,17 @@ int main()
     fxprice::Settings settings;
     settings.refreshSeconds = 17;
     settings.symbols = {L"EURUSD", L"USDJPY"};
+    settings.display.showBid = false;
+    settings.display.showChange = false;
+    settings.display.precision = 4;
     Check(config.Save(settings), "保存无凭据插件配置");
     const fxprice::Settings loaded = config.Load();
     Check(loaded.refreshSeconds == 17, "读取刷新间隔");
     Check(loaded.symbols == settings.symbols, "读取全部外汇标的");
+    Check(!loaded.display.showBid && loaded.display.showAsk && loaded.display.showMid &&
+              !loaded.display.showChange,
+          "读取显示开关");
+    Check(loaded.display.precision == 4, "读取固定小数位");
     std::ifstream configFile(std::filesystem::path(config.Path()), std::ios::binary);
     const std::string configText((std::istreambuf_iterator<char>(configFile)),
                                  std::istreambuf_iterator<char>());

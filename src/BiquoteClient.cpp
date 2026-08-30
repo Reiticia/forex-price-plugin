@@ -34,7 +34,7 @@ bool WinHttpTransport::Get(const std::wstring& host, const std::wstring& path,
                            std::string& response, std::string& error)
 {
     response.clear();
-    InternetHandle session(WinHttpOpen(L"TrafficMonitor FxPricePlugin/0.2",
+    InternetHandle session(WinHttpOpen(L"TrafficMonitor FxPricePlugin/0.3",
                                        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                        WINHTTP_NO_PROXY_NAME,
                                        WINHTTP_NO_PROXY_BYPASS, 0));

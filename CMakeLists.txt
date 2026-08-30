@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FxPricePlugin VERSION 0.2.0 LANGUAGES CXX)
+project(FxPricePlugin VERSION 0.3.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "FxPricePlugin 仅支持 Windows。")

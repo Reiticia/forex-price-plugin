@@ -18,6 +18,20 @@ std::wstring AsciiToWide(const std::string& value)
         result.push_back(static_cast<wchar_t>(character));
     return result;
 }
+
+struct ValueBuilder
+{
+    static void Append(std::wstring& result, bool& first, bool enabled,
+                       const wchar_t* label, const std::wstring& value)
+    {
+        if (!enabled) return;
+        if (!first) result += L' ';
+        first = false;
+        result += label;
+        result += L':';
+        result += value;
+    }
+};
 } // namespace
 
 std::wstring NormalizeSymbol(std::wstring value)
@@ -72,31 +86,85 @@ std::wstring FormatPercentage(const std::optional<double>& value)
     return stream.str();
 }
 
-std::wstring FormatQuoteValue(const Quote& quote)
+std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options)
 {
-    const std::wstring bid = FormatNumber(quote.bid, quote.precision);
-    const std::wstring ask = FormatNumber(quote.ask, quote.precision);
-    const std::wstring midpoint = FormatNumber(quote.midpoint, quote.precision);
-    return L"买 " + bid + L" 卖 " + ask + L" 中 " + midpoint + L" " +
-           FormatPercentage(quote.dailyChangePercent);
+    const int precision = options.precision >= 0 ? options.precision : quote.precision;
+    std::wstring result;
+    bool first = true;
+    ValueBuilder::Append(result, first, options.showBid, L"买",
+                         FormatNumber(quote.bid, precision));
+    ValueBuilder::Append(result, first, options.showAsk, L"卖",
+                         FormatNumber(quote.ask, precision));
+    ValueBuilder::Append(result, first, options.showMid, L"中",
+                         FormatNumber(quote.midpoint, precision));
+    ValueBuilder::Append(result, first, options.showChange, L"涨跌",
+                         FormatPercentage(quote.dailyChangePercent));
+    return result;
 }
 
-std::wstring FormatQuoteSummary(const Quote& quote)
+std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& options)
 {
-    return FormatNumber(quote.midpoint, quote.precision) + L" " +
-           FormatPercentage(quote.dailyChangePercent);
+    const int precision = options.precision >= 0 ? options.precision : quote.precision;
+    double primary = 0.0;
+    bool hasPrimary = false;
+    if (options.showMid)
+    {
+        primary = quote.midpoint;
+        hasPrimary = true;
+    }
+    else if (options.showBid)
+    {
+        primary = quote.bid;
+        hasPrimary = true;
+    }
+    else if (options.showAsk)
+    {
+        primary = quote.ask;
+        hasPrimary = true;
+    }
+    std::wstring result;
+    if (hasPrimary) result = FormatNumber(primary, precision);
+    if (options.showChange)
+    {
+        if (!result.empty()) result += L' ';
+        result += FormatPercentage(quote.dailyChangePercent);
+    }
+    return result;
 }
 
-std::wstring FormatQuoteDetail(const Quote& quote)
+std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options)
 {
-    const std::wstring bid = FormatNumber(quote.bid, quote.precision);
-    const std::wstring ask = FormatNumber(quote.ask, quote.precision);
-    const std::wstring midpoint = FormatNumber(quote.midpoint, quote.precision);
+    const int precision = options.precision >= 0 ? options.precision : quote.precision;
     std::wstring result;
     if (!quote.description.empty())
         result += AsciiToWide(quote.description) + L" | ";
-    result += L"买一 " + bid + L" | 卖一 " + ask + L" | 中间价 " + midpoint +
-              L" | 日涨跌 " + FormatPercentage(quote.dailyChangePercent);
+    bool first = true;
+    auto append = [&](bool enabled, const wchar_t* label, const std::wstring& value) {
+        if (!enabled) return;
+        if (!first) result += L" | ";
+        first = false;
+        result += label;
+        result += L' ';
+        result += value;
+    };
+    append(options.showBid, L"买一", FormatNumber(quote.bid, precision));
+    append(options.showAsk, L"卖一", FormatNumber(quote.ask, precision));
+    append(options.showMid, L"中间价", FormatNumber(quote.midpoint, precision));
+    append(options.showChange, L"日涨跌", FormatPercentage(quote.dailyChangePercent));
+    return result;
+}
+
+std::wstring FormatQuoteSample(const DisplayOptions& options)
+{
+    const int precision = options.precision >= 0 ? options.precision : 5;
+    const std::wstring placeholder = FormatNumber(0.0, precision);
+    const std::wstring changePlaceholder = L"+0.00%";
+    std::wstring result;
+    bool first = true;
+    ValueBuilder::Append(result, first, options.showBid, L"买", placeholder);
+    ValueBuilder::Append(result, first, options.showAsk, L"卖", placeholder);
+    ValueBuilder::Append(result, first, options.showMid, L"中", placeholder);
+    ValueBuilder::Append(result, first, options.showChange, L"涨跌", changePlaceholder);
     return result;
 }
 } // namespace fxprice

@@ -47,6 +47,20 @@ Settings NormalizeSettings(Settings settings)
     settings.symbols = std::move(normalized);
     return settings;
 }
+
+// 汇总行示例文本：主价格占位 + （勾选时的）涨跌幅占位。
+std::wstring SummarySample(const DisplayOptions& options)
+{
+    std::wstring result;
+    if (options.showMid || options.showBid || options.showAsk)
+        result = L"0.00000";
+    if (options.showChange)
+    {
+        if (!result.empty()) result += L' ';
+        result += L"+0.00%";
+    }
+    return result;
+}
 } // namespace
 
 FxPricePlugin& FxPricePlugin::Instance()
@@ -128,7 +142,7 @@ const wchar_t* FxPricePlugin::GetInfo(PluginInfoIndex index)
         return L"无需账户或 API Key，显示外汇买一价、卖一价、中间价和日涨跌幅";
     case TMI_AUTHOR: return L"Reiticia";
     case TMI_COPYRIGHT: return L"Copyright (C) 2026";
-    case TMI_VERSION: return L"0.2.0";
+    case TMI_VERSION: return L"0.3.0";
     case TMI_URL: return L"https://github.com/Reiticia/fx-price-plugin";
     default: return L"";
     }
@@ -179,7 +193,7 @@ void FxPricePlugin::ApplySettings(Settings settings)
             item.label_ = display + L": ";
             item.value_ = L"--";
             item.summary_ = L"--";
-            item.sample_ = L"买 0.00000 卖 0.00000 中 0.00000 +00.00%";
+            item.sample_ = FormatQuoteSample(settings_.display);
             item.detail_ = L"等待行情";
         }
         items_[0].value_ = L"等待行情";
@@ -286,9 +300,13 @@ void FxPricePlugin::UpdateItem(std::size_t index, const Quote* quote,
         return;
     }
 
-    item.value_ = FormatQuoteValue(*quote);
-    item.summary_ = FormatQuoteSummary(*quote);
-    item.detail_ = FormatQuoteDetail(*quote);
+    const DisplayOptions& options = settings_.display;
+    item.value_ = FormatQuoteValue(*quote, options);
+    item.summary_ = FormatQuoteSummary(*quote, options);
+    item.detail_ = FormatQuoteDetail(*quote, options);
+    if (item.value_.empty()) item.value_ = L"--";
+    if (item.summary_.empty()) item.summary_ = L"--";
+    if (item.detail_.empty()) item.detail_ = L"--";
 }
 
 void FxPricePlugin::RebuildAggregateAndTooltip()
@@ -307,7 +325,7 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
             aggregate.sample_ += L" | ";
         }
         aggregate.value_ += display + L" " + item.summary_;
-        aggregate.sample_ += display + L" 0.00000 +00.00%";
+        aggregate.sample_ += display + L" " + SummarySample(settings_.display);
         tooltip_ += L"\n" + display + L"：" + item.detail_;
     }
     tooltip_ += L"\n涨跌幅为相对前收的日涨跌，并非严格滚动 24 小时。";

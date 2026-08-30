@@ -55,6 +55,18 @@ Settings ConfigStore::Load() const
         static_cast<int>(GetPrivateProfileIntW(L"General", L"RefreshSeconds", 10,
                                                path_.c_str())),
         2, 300);
+    settings.display.showBid =
+        GetPrivateProfileIntW(L"General", L"ShowBid", 1, path_.c_str()) != 0;
+    settings.display.showAsk =
+        GetPrivateProfileIntW(L"General", L"ShowAsk", 1, path_.c_str()) != 0;
+    settings.display.showMid =
+        GetPrivateProfileIntW(L"General", L"ShowMid", 1, path_.c_str()) != 0;
+    settings.display.showChange =
+        GetPrivateProfileIntW(L"General", L"ShowChange", 1, path_.c_str()) != 0;
+    settings.display.precision = std::clamp(
+        static_cast<int>(GetPrivateProfileIntW(L"General", L"DisplayPrecision", -1,
+                                               path_.c_str())),
+        -1, 10);
     const int count = std::clamp(
         static_cast<int>(GetPrivateProfileIntW(L"General", L"Count", 1, path_.c_str())),
         0, static_cast<int>(kMaxSymbols));
@@ -82,6 +94,13 @@ bool ConfigStore::Save(const Settings& settings) const
     bool success = true;
     success &= write(L"General", L"RefreshSeconds",
                      std::to_wstring(std::clamp(settings.refreshSeconds, 2, 300)));
+    success &= write(L"General", L"ShowBid", settings.display.showBid ? L"1" : L"0");
+    success &= write(L"General", L"ShowAsk", settings.display.showAsk ? L"1" : L"0");
+    success &= write(L"General", L"ShowMid", settings.display.showMid ? L"1" : L"0");
+    success &= write(L"General", L"ShowChange",
+                     settings.display.showChange ? L"1" : L"0");
+    success &= write(L"General", L"DisplayPrecision",
+                     std::to_wstring(std::clamp(settings.display.precision, -1, 10)));
     success &= write(L"General", L"Count", std::to_wstring(symbols.size()));
     for (std::size_t index = 0; index < symbols.size(); ++index)
     {

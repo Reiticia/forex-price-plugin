@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Config.h"
+
 #include <optional>
 #include <string>
 
@@ -22,7 +24,13 @@ std::wstring DisplaySymbol(const std::wstring& value);
 std::string WideToAscii(const std::wstring& value);
 std::wstring FormatNumber(double value, int precision);
 std::wstring FormatPercentage(const std::optional<double>& value);
-std::wstring FormatQuoteValue(const Quote& quote);
-std::wstring FormatQuoteSummary(const Quote& quote);
-std::wstring FormatQuoteDetail(const Quote& quote);
+
+// 任务栏独立项文本：仅包含勾选字段，标签+值紧凑排布。
+std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options);
+// 汇总项主价格 + 涨跌幅（主价格优先取中间价，其次买价、卖价）。
+std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& options);
+// 工具提示详细文本：完整中文标签，竖线分隔，仅包含勾选字段。
+std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options);
+// 按勾选字段生成带占位值的示例文本（用于设置界面预览）。
+std::wstring FormatQuoteSample(const DisplayOptions& options);
 } // namespace fxprice

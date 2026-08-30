@@ -21,6 +21,11 @@ constexpr int kRemoveButton = 1005;
 constexpr int kRefreshEdit = 1006;
 constexpr int kSourceCombo = 1007;
 constexpr int kStatusText = 1008;
+constexpr int kShowBid = 1009;
+constexpr int kShowAsk = 1010;
+constexpr int kShowMid = 1011;
+constexpr int kShowChange = 1012;
+constexpr int kPrecisionEdit = 1013;
 
 HWND AddControl(HWND parent, const wchar_t* className, const wchar_t* text,
                 DWORD style, int x, int y, int width, int height, int id)
@@ -186,45 +191,78 @@ void OptionsWindow::CreateControls()
                        WS_BORDER | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY,
                        18, 36, 624, 186, kSymbolList);
 
-    AddControl(window_, L"STATIC", L"交易对", 0, 18, 238, 52, 20, -1);
+    // 左列中文标签宽度统一为 72，避免"交易对/刷新间隔"被输入框遮挡。
+    constexpr int kLabelWidth = 72;
+    constexpr int kLabelY = 234;
+    constexpr int kControlY = 232;
+
+    AddControl(window_, L"STATIC", L"交易对", 0, 18, kLabelY, kLabelWidth, 20, -1);
     symbol_ = AddControl(window_, L"EDIT", L"",
                          WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
-                         74, 234, 176, 25, kSymbolEdit);
+                         94, kControlY, 148, 25, kSymbolEdit);
     SendMessageW(symbol_, EM_SETLIMITTEXT, 16, 0);
-    AddControl(window_, L"STATIC", L"数据源", 0, 270, 238, 52, 20, -1);
+
+    AddControl(window_, L"STATIC", L"数据源", 0, 258, kLabelY, 56, 20, -1);
     const HWND source = AddControl(window_, L"COMBOBOX", L"",
                                    WS_TABSTOP | CBS_DROPDOWNLIST,
-                                   340, 234, 178, 120, kSourceCombo);
+                                   318, kControlY, 180, 120, kSourceCombo);
     SendMessageW(source, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"biquote.io（无 Key）"));
     SendMessageW(source, CB_SETCURSEL, 0, 0);
     EnableWindow(source, FALSE);
 
-    AddControl(window_, L"BUTTON", L"添加新标的",
-               WS_TABSTOP | BS_PUSHBUTTON, 530, 233, 112, 27, kAddButton);
-    AddControl(window_, L"BUTTON", L"更新选中项",
-               WS_TABSTOP | BS_PUSHBUTTON, 530, 267, 112, 27, kUpdateButton);
-    AddControl(window_, L"BUTTON", L"删除选中项",
-               WS_TABSTOP | BS_PUSHBUTTON, 530, 301, 112, 27, kRemoveButton);
-
-    AddControl(window_, L"STATIC", L"刷新间隔", 0, 18, 282, 65, 20, -1);
+    AddControl(window_, L"STATIC", L"刷新间隔", 0, 18, 268, kLabelWidth, 20, -1);
     refresh_ = AddControl(window_, L"EDIT",
                           std::to_wstring(draft_.refreshSeconds).c_str(),
                           WS_BORDER | WS_TABSTOP | ES_NUMBER,
-                          88, 278, 70, 25, kRefreshEdit);
-    AddControl(window_, L"STATIC", L"秒（2–300）", 0, 164, 282, 92, 20, -1);
+                          94, 264, 70, 25, kRefreshEdit);
+    AddControl(window_, L"STATIC", L"秒（2–300）", 0, 170, 268, 110, 20, -1);
 
-    AddControl(window_, L"STATIC", L"显示内容", 0, 18, 322, 65, 20, -1);
-    AddControl(window_, L"STATIC", L"买一价、卖一价、中间价、日涨跌幅",
-               0, 88, 322, 250, 20, -1);
-    AddControl(window_, L"STATIC", L"涨跌口径", 0, 350, 322, 65, 20, -1);
-    AddControl(window_, L"STATIC", L"相对前收（非严格滚动 24 小时）",
-               0, 420, 322, 215, 20, -1);
+    // "显示内容"改为可勾选的四个字段，逐项独立控制。
+    AddControl(window_, L"STATIC", L"显示内容", 0, 18, 302, kLabelWidth, 20, -1);
+    showBid_ = AddControl(window_, L"BUTTON", L"买一价",
+                          WS_TABSTOP | BS_AUTOCHECKBOX,
+                          94, 298, 78, 22, kShowBid);
+    showAsk_ = AddControl(window_, L"BUTTON", L"卖一价",
+                          WS_TABSTOP | BS_AUTOCHECKBOX,
+                          178, 298, 78, 22, kShowAsk);
+    showMid_ = AddControl(window_, L"BUTTON", L"中间价",
+                          WS_TABSTOP | BS_AUTOCHECKBOX,
+                          262, 298, 78, 22, kShowMid);
+    showChange_ = AddControl(window_, L"BUTTON", L"日涨跌幅",
+                             WS_TABSTOP | BS_AUTOCHECKBOX,
+                             346, 298, 104, 22, kShowChange);
+    SendMessageW(showBid_, BM_SETCHECK, draft_.display.showBid ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(showAsk_, BM_SETCHECK, draft_.display.showAsk ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(showMid_, BM_SETCHECK, draft_.display.showMid ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(showChange_, BM_SETCHECK, draft_.display.showChange ? BST_CHECKED : BST_UNCHECKED, 0);
+
+    // "小数位数"：留空自动推断，填 0–10 固定显示位数。
+    AddControl(window_, L"STATIC", L"小数位数", 0, 18, 336, kLabelWidth, 20, -1);
+    precision_ = AddControl(window_, L"EDIT", L"",
+                            WS_BORDER | WS_TABSTOP | ES_NUMBER,
+                            94, 332, 44, 25, kPrecisionEdit);
+    if (draft_.display.precision >= 0)
+        SetWindowTextW(precision_, std::to_wstring(draft_.display.precision).c_str());
+    SendMessageW(precision_, EM_SETLIMITTEXT, 4, 0);
+    AddControl(window_, L"STATIC", L"留空自动；0–10 固定",
+               0, 148, 336, 160, 20, -1);
+
+    AddControl(window_, L"STATIC", L"涨跌口径", 0, 18, 362, kLabelWidth, 20, -1);
+    AddControl(window_, L"STATIC", L"相对前收，非严格滚动 24 小时",
+               0, 94, 362, 400, 20, -1);
+
+    AddControl(window_, L"BUTTON", L"添加新标的",
+               WS_TABSTOP | BS_PUSHBUTTON, 530, 232, 112, 27, kAddButton);
+    AddControl(window_, L"BUTTON", L"更新选中项",
+               WS_TABSTOP | BS_PUSHBUTTON, 530, 266, 112, 27, kUpdateButton);
+    AddControl(window_, L"BUTTON", L"删除选中项",
+               WS_TABSTOP | BS_PUSHBUTTON, 530, 300, 112, 27, kRemoveButton);
 
     status_ = AddControl(
         window_, L"STATIC",
         L"输入如 EUR/USD；EUR-USD、eurusd 会自动规范化。",
-        0, 18, 394, 610, 22, kStatusText);
+        0, 18, 392, 610, 22, kStatusText);
     AddControl(window_, L"BUTTON", L"确定",
                WS_TABSTOP | BS_DEFPUSHBUTTON, 454, 434, 88, 29, IDOK);
     AddControl(window_, L"BUTTON", L"取消",
@@ -365,6 +403,34 @@ void OptionsWindow::Accept()
         return;
     }
     draft_.refreshSeconds = static_cast<int>(seconds);
+
+    draft_.display.showBid =
+        SendMessageW(showBid_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    draft_.display.showAsk =
+        SendMessageW(showAsk_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    draft_.display.showMid =
+        SendMessageW(showMid_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    draft_.display.showChange =
+        SendMessageW(showChange_, BM_GETCHECK, 0, 0) == BST_CHECKED;
+
+    std::array<wchar_t, 8> precisionText{};
+    GetWindowTextW(precision_, precisionText.data(),
+                   static_cast<int>(precisionText.size()));
+    draft_.display.precision = -1; // 默认自动推断
+    wchar_t* precisionEnd = nullptr;
+    const long precisionValue = std::wcstol(precisionText.data(), &precisionEnd, 10);
+    if (precisionText[0] != L'\0' &&
+        (precisionEnd == precisionText.data() || *precisionEnd != L'\0' ||
+         precisionValue < 0 || precisionValue > 10))
+    {
+        SetStatus(L"小数位数必须是 0 到 10 之间的整数，或留空为自动判断。 ");
+        SetFocus(precision_);
+        MessageBeep(MB_ICONWARNING);
+        return;
+    }
+    if (precisionText[0] != L'\0')
+        draft_.display.precision = static_cast<int>(precisionValue);
+
     accepted_ = true;
     DestroyWindow(window_);
 }

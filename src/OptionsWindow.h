@@ -36,6 +36,11 @@ private:
     HWND list_{};
     HWND symbol_{};
     HWND refresh_{};
+    HWND precision_{};
+    HWND showBid_{};
+    HWND showAsk_{};
+    HWND showMid_{};
+    HWND showChange_{};
     HWND status_{};
     bool accepted_{};
 };
