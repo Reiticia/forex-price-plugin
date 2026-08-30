@@ -248,71 +248,67 @@ bool ReadNumber(const JsonValue& value, double& output)
 }
 } // namespace
 
-std::string BuildScannerRequest(const std::vector<std::wstring>& symbols)
+std::string BuildLatestQuery(const std::vector<std::wstring>& symbols)
 {
-    std::string request = R"({"symbols":{"tickers":[)";
+    std::string query = "/api/latest";
     bool first = true;
     for (const std::wstring& raw : symbols)
     {
         const std::wstring symbol = NormalizeSymbol(raw);
         if (!IsValidSymbol(symbol)) continue;
-        if (!first) request += ',';
+        query += (first ? "?symbols=" : "&symbols=") + WideToAscii(symbol);
         first = false;
-        request += "\"FX_IDC:" + WideToAscii(symbol) + "\"";
     }
-    request += R"(],"query":{"types":[]}},"columns":["name","description","bid","ask","change"]})";
-    return request;
+    return query;
 }
 
-bool ParseScannerResponse(const std::string& json,
-                          std::unordered_map<std::string, Quote>& quotes,
-                          std::string& error)
+bool ParseLatestResponse(const std::string& json,
+                         std::unordered_map<std::string, Quote>& quotes,
+                         std::string& error)
 {
     JsonValue root;
     if (!JsonParser(json).Parse(root, error)) return false;
-    const JsonValue* data = Member(root, "data");
-    if (!data || data->type != JsonValue::Type::Array)
+    if (root.type != JsonValue::Type::Object)
     {
-        error = "TradingView 响应缺少 data 数组";
+        error = "biquote 响应格式无效：根节点应为对象";
         return false;
     }
 
     quotes.clear();
-    for (const JsonValue& row : data->array)
+    for (const auto& entry : root.object)
     {
-        std::string providerSymbol;
-        const JsonValue* columns = Member(row, "d");
-        if (!ReadString(row, "s", providerSymbol) || !columns ||
-            columns->type != JsonValue::Type::Array || columns->array.size() < 5)
-            continue;
-
-        const std::size_t separator = providerSymbol.rfind(':');
-        std::string symbol = separator == std::string::npos
-            ? providerSymbol : providerSymbol.substr(separator + 1);
-        if (columns->array[0].type == JsonValue::Type::String)
-            symbol = columns->array[0].text;
-        const std::wstring wideSymbol(symbol.begin(), symbol.end());
-        if (!IsValidSymbol(wideSymbol)) continue;
+        const JsonValue& value = entry.second;
+        if (value.type != JsonValue::Type::Object) continue;
 
         Quote quote;
-        quote.symbol = symbol;
-        if (columns->array[1].type == JsonValue::Type::String)
-            quote.description = columns->array[1].text;
-        if (!ReadNumber(columns->array[2], quote.bid) ||
-            !ReadNumber(columns->array[3], quote.ask) || quote.bid <= 0.0 || quote.ask <= 0.0)
+        if (!ReadString(value, "symbol", quote.symbol)) quote.symbol = entry.first;
+        const std::wstring wideSymbol(quote.symbol.begin(), quote.symbol.end());
+        if (!IsValidSymbol(wideSymbol)) continue;
+        const JsonValue* bidValue = Member(value, "bid");
+        const JsonValue* askValue = Member(value, "ask");
+        if (!bidValue || !ReadNumber(*bidValue, quote.bid) ||
+            !askValue || !ReadNumber(*askValue, quote.ask) ||
+            quote.bid <= 0.0 || quote.ask <= 0.0)
             continue;
-        quote.midpoint = (quote.bid + quote.ask) / 2.0;
-        quote.precision = std::clamp((std::max)(DecimalPlaces(columns->array[2].text),
-                                                DecimalPlaces(columns->array[3].text)),
+        const JsonValue* midValue = Member(value, "mid");
+        if (!midValue || !ReadNumber(*midValue, quote.midpoint) ||
+            quote.midpoint <= 0.0)
+            quote.midpoint = (quote.bid + quote.ask) / 2.0;
+        ReadString(value, "description", quote.description);
+
+        quote.precision = std::clamp((std::max)(DecimalPlaces(bidValue->text),
+                                                DecimalPlaces(askValue->text)),
                                      0, 10);
+        const JsonValue* changeValue = Member(value, "dayDiffPercent");
         double change = 0.0;
-        if (ReadNumber(columns->array[4], change)) quote.dailyChangePercent = change;
+        if (changeValue && ReadNumber(*changeValue, change))
+            quote.dailyChangePercent = change;
         quotes[quote.symbol] = std::move(quote);
     }
 
     if (quotes.empty())
     {
-        error = "TradingView 响应中没有有效的外汇买卖报价";
+        error = "biquote 响应中没有有效的外汇买卖报价";
         return false;
     }
     error.clear();

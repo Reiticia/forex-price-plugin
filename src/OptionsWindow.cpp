@@ -196,7 +196,7 @@ void OptionsWindow::CreateControls()
                                    WS_TABSTOP | CBS_DROPDOWNLIST,
                                    340, 234, 178, 120, kSourceCombo);
     SendMessageW(source, CB_ADDSTRING, 0,
-                 reinterpret_cast<LPARAM>(L"TradingView FX_IDC"));
+                 reinterpret_cast<LPARAM>(L"biquote.io（无 Key）"));
     SendMessageW(source, CB_SETCURSEL, 0, 0);
     EnableWindow(source, FALSE);
 
@@ -240,7 +240,7 @@ void OptionsWindow::RefreshList(int selection)
     for (const std::wstring& symbol : draft_.symbols)
     {
         const std::wstring caption = DisplaySymbol(symbol) +
-                                     L"    TradingView FX_IDC";
+                                     L"    biquote.io（无 Key）";
         SendMessageW(list_, LB_ADDSTRING, 0,
                      reinterpret_cast<LPARAM>(caption.c_str()));
     }

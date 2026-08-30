@@ -12,23 +12,21 @@ class IHttpTransport
 {
 public:
     virtual ~IHttpTransport() = default;
-    virtual bool PostJson(const std::wstring& host, const std::wstring& path,
-                          const std::string& body, std::string& response,
-                          std::string& error) = 0;
+    virtual bool Get(const std::wstring& host, const std::wstring& path,
+                     std::string& response, std::string& error) = 0;
 };
 
 class WinHttpTransport final : public IHttpTransport
 {
 public:
-    bool PostJson(const std::wstring& host, const std::wstring& path,
-                  const std::string& body, std::string& response,
-                  std::string& error) override;
+    bool Get(const std::wstring& host, const std::wstring& path,
+             std::string& response, std::string& error) override;
 };
 
-class ScannerClient
+class BiquoteClient
 {
 public:
-    explicit ScannerClient(IHttpTransport& transport) : transport_(transport) {}
+    explicit BiquoteClient(IHttpTransport& transport) : transport_(transport) {}
 
     bool Fetch(const std::vector<std::wstring>& symbols,
                std::unordered_map<std::string, Quote>& quotes,

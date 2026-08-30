@@ -78,7 +78,7 @@ private:
     std::array<PriceItem, kMaxSymbols + 1> items_;
     ConfigStore config_;
     Settings settings_;
-    std::wstring tooltip_{L"TradingView 外汇行情\n等待刷新"};
+    std::wstring tooltip_{L"biquote.io 外汇行情\n等待刷新"};
 
     std::mutex settingsMutex_;
     std::mutex pendingMutex_;

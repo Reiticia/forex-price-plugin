@@ -1,4 +1,4 @@
-#include "ScannerClient.h"
+#include "BiquoteClient.h"
 
 #include "MarketData.h"
 
@@ -6,6 +6,7 @@
 #include <winhttp.h>
 
 #include <memory>
+#include <string>
 
 namespace fxprice
 {
@@ -29,12 +30,11 @@ std::string WindowsError(const char* operation)
 }
 } // namespace
 
-bool WinHttpTransport::PostJson(const std::wstring& host, const std::wstring& path,
-                                const std::string& body, std::string& response,
-                                std::string& error)
+bool WinHttpTransport::Get(const std::wstring& host, const std::wstring& path,
+                           std::string& response, std::string& error)
 {
     response.clear();
-    InternetHandle session(WinHttpOpen(L"TrafficMonitor FxPricePlugin/1.0",
+    InternetHandle session(WinHttpOpen(L"TrafficMonitor FxPricePlugin/0.2",
                                        WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                        WINHTTP_NO_PROXY_NAME,
                                        WINHTTP_NO_PROXY_BYPASS, 0));
@@ -50,14 +50,14 @@ bool WinHttpTransport::PostJson(const std::wstring& host, const std::wstring& pa
     }
 
     InternetHandle connection(WinHttpConnect(session.get(), host.c_str(),
-                                              INTERNET_DEFAULT_HTTPS_PORT, 0));
+                                             INTERNET_DEFAULT_HTTPS_PORT, 0));
     if (!connection)
     {
         error = WindowsError("WinHttpConnect");
         return false;
     }
 
-    InternetHandle request(WinHttpOpenRequest(connection.get(), L"POST", path.c_str(),
+    InternetHandle request(WinHttpOpenRequest(connection.get(), L"GET", path.c_str(),
                                               nullptr, WINHTTP_NO_REFERER,
                                               WINHTTP_DEFAULT_ACCEPT_TYPES,
                                               WINHTTP_FLAG_SECURE));
@@ -67,16 +67,12 @@ bool WinHttpTransport::PostJson(const std::wstring& host, const std::wstring& pa
         return false;
     }
 
-    constexpr wchar_t headers[] =
-        L"Content-Type: application/json; charset=utf-8\r\nAccept: application/json\r\n";
+    constexpr wchar_t headers[] = L"Accept: application/json\r\n";
     if (!WinHttpSendRequest(request.get(), headers, static_cast<DWORD>(-1L),
-                            body.empty() ? WINHTTP_NO_REQUEST_DATA
-                                         : const_cast<char*>(body.data()),
-                            static_cast<DWORD>(body.size()),
-                            static_cast<DWORD>(body.size()), 0) ||
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.get(), nullptr))
     {
-        error = WindowsError("TradingView 网络请求");
+        error = WindowsError("biquote 网络请求");
         return false;
     }
 
@@ -90,6 +86,11 @@ bool WinHttpTransport::PostJson(const std::wstring& host, const std::wstring& pa
         error = WindowsError("读取 HTTP 状态码");
         return false;
     }
+    if (statusCode != 200)
+    {
+        error = "biquote 返回 HTTP " + std::to_string(statusCode);
+        return false;
+    }
 
     for (;;)
     {
@@ -100,9 +101,9 @@ bool WinHttpTransport::PostJson(const std::wstring& host, const std::wstring& pa
             return false;
         }
         if (available == 0) break;
-        if (response.size() + available > kMaxResponseBytes)
+        if (available > kMaxResponseBytes - response.size())
         {
-            error = "TradingView 响应超过 1 MiB 限制";
+            error = "biquote 响应超过 1 MiB 限制";
             return false;
         }
         const std::size_t offset = response.size();
@@ -110,30 +111,30 @@ bool WinHttpTransport::PostJson(const std::wstring& host, const std::wstring& pa
         DWORD received = 0;
         if (!WinHttpReadData(request.get(), response.data() + offset, available, &received))
         {
-            error = WindowsError("读取 TradingView 响应");
+            error = WindowsError("读取 biquote 响应");
             return false;
         }
         response.resize(offset + received);
     }
 
-    if (statusCode != 200)
-    {
-        error = "TradingView 返回 HTTP " + std::to_string(statusCode);
-        return false;
-    }
     error.clear();
     return true;
 }
 
-bool ScannerClient::Fetch(const std::vector<std::wstring>& symbols,
+bool BiquoteClient::Fetch(const std::vector<std::wstring>& symbols,
                           std::unordered_map<std::string, Quote>& quotes,
                           std::string& error)
 {
-    const std::string request = BuildScannerRequest(symbols);
-    std::string response;
-    if (!transport_.PostJson(L"scanner.tradingview.com", L"/forex/scan",
-                             request, response, error))
+    const std::string path = BuildLatestQuery(symbols);
+    if (path.find('?') == std::string::npos)
+    {
+        error = "没有有效的交易对可查询";
         return false;
-    return ParseScannerResponse(response, quotes, error);
+    }
+    std::string response;
+    if (!transport_.Get(L"biquote.io", std::wstring(path.begin(), path.end()),
+                        response, error))
+        return false;
+    return ParseLatestResponse(response, quotes, error);
 }
 } // namespace fxprice

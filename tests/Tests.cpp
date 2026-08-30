@@ -1,7 +1,7 @@
+#include "BiquoteClient.h"
 #include "Config.h"
 #include "MarketData.h"
 #include "Quote.h"
-#include "ScannerClient.h"
 
 #include <Windows.h>
 
@@ -21,13 +21,11 @@ int failures = 0;
 class FakeTransport final : public fxprice::IHttpTransport
 {
 public:
-    bool PostJson(const std::wstring& host, const std::wstring& path,
-                  const std::string& body, std::string& response,
-                  std::string& error) override
+    bool Get(const std::wstring& host, const std::wstring& path,
+             std::string& response, std::string& error) override
     {
         lastHost = host;
         lastPath = path;
-        lastBody = body;
         response = responseBody;
         error.clear();
         return true;
@@ -35,7 +33,6 @@ public:
 
     std::wstring lastHost;
     std::wstring lastPath;
-    std::string lastBody;
     std::string responseBody;
 };
 
@@ -69,68 +66,98 @@ int main()
           "标的列表最多保留 8 个");
     Check(fxprice::NormalizeSymbols({L"!!", L"", L"EUR"}).empty(),
           "全部无效时返回空列表");
-    Check(fxprice::BuildScannerRequest({L"!!", L""}).find("FX_IDC:") ==
+
+    const std::string query = fxprice::BuildLatestQuery({L"EURUSD", L"USDJPY"});
+    Check(query == "/api/latest?symbols=EURUSD&symbols=USDJPY",
+          "批量查询按重复 symbols 参数构造");
+    Check(fxprice::BuildLatestQuery({L"eur/usd", L"GBP-USD"}) ==
+              "/api/latest?symbols=EURUSD&symbols=GBPUSD",
+          "批量查询自动规范化标的");
+    Check(fxprice::BuildLatestQuery({L"!!", L""}).find("symbols=") ==
               std::string::npos,
-          "请求构造跳过无效标的");
+          "批量查询跳过无效标的");
 
-    const std::string request = fxprice::BuildScannerRequest({L"EURUSD", L"USDJPY"});
-    Check(request.find("FX_IDC:EURUSD") != std::string::npos,
-          "请求包含 EURUSD ticker");
-    Check(request.find("FX_IDC:USDJPY") != std::string::npos,
-          "请求包含 USDJPY ticker");
-    Check(request.find("\"bid\"") != std::string::npos &&
-              request.find("\"ask\"") != std::string::npos &&
-              request.find("\"change\"") != std::string::npos,
-          "请求买价、卖价和日涨跌字段");
-    Check(request.find("\"close\"") == std::string::npos,
-          "请求不包含未使用的收盘价字段");
-
-    const std::string response = R"({
-      "totalCount": 2,
-      "data": [
-        {"s":"FX_IDC:EURUSD","d":["EURUSD","EURO / U.S. DOLLAR",1.15831,1.15857,-0.5836408892]},
-        {"s":"FX_IDC:USDJPY","d":["USDJPY","U.S. DOLLAR / JAPANESE YEN",146.812,146.836,0.2145]}
-      ]
-    })";
+    // 截取自 biquote.io /api/latest 的真实响应（字段值保持原样）。
+    const std::string response = R"json({
+      "EURUSD": {"symbol":"EURUSD","bid":1.15823,"ask":1.15829,"last":0.0,"volume":0,
+        "timestamp":"2026-08-28T20:58:48Z","source":"MetaTrader 5 (Broker 1)",
+        "high":1.16597,"low":1.15774,"direction":"UP","dayDiffPercent":-0.6075,
+        "description":"Euro vs US Dollar","time":"2026.08.28 20:58:48",
+        "spread":0.00006,"mid":1.15826,"stale":true,"quoteAgeSeconds":121619,
+        "marketState":"closed","lastQuoteAt":"2026-08-28T20:58:48Z"},
+      "USDJPY": {"symbol":"USDJPY","bid":160.097,"ask":160.109,"last":0.0,"volume":0,
+        "timestamp":"2026-08-28T20:58:47Z","source":"MetaTrader 5 (Broker 1)",
+        "high":160.42,"low":159.65,"direction":"UP","dayDiffPercent":0.4911,
+        "description":"US Dollar vs Japanese Yen","time":"2026.08.28 20:58:47",
+        "spread":0.012,"mid":160.103,"stale":true,"quoteAgeSeconds":121622,
+        "marketState":"closed","lastQuoteAt":"2026-08-28T20:58:47Z"}
+    })json";
     std::unordered_map<std::string, fxprice::Quote> quotes;
     std::string error;
-    Check(fxprice::ParseScannerResponse(response, quotes, error),
-          "解析 TradingView Scanner 响应");
+    Check(fxprice::ParseLatestResponse(response, quotes, error),
+          "解析 biquote /api/latest 响应");
     Check(quotes.size() == 2, "解析全部外汇报价");
-    Check(std::abs(quotes["EURUSD"].bid - 1.15831) < 0.0000001,
+    Check(std::abs(quotes["EURUSD"].bid - 1.15823) < 0.0000001,
           "读取买一价");
-    Check(std::abs(quotes["EURUSD"].ask - 1.15857) < 0.0000001,
+    Check(std::abs(quotes["EURUSD"].ask - 1.15829) < 0.0000001,
           "读取卖一价");
-    Check(std::abs(quotes["EURUSD"].midpoint - 1.15844) < 0.0000001,
-          "计算中间价");
-    Check(quotes["EURUSD"].precision == 5, "保留报价精度");
+    Check(std::abs(quotes["EURUSD"].midpoint - 1.15826) < 0.0000001,
+          "读取服务端中间价");
+    Check(quotes["EURUSD"].precision == 5, "按报价小数位保留精度");
+    Check(quotes["USDJPY"].precision == 3, "日元货币对保留三位小数");
     Check(quotes["EURUSD"].dailyChangePercent &&
-              std::abs(*quotes["EURUSD"].dailyChangePercent + 0.5836408892) < 0.0000001,
+              std::abs(*quotes["EURUSD"].dailyChangePercent + 0.6075) < 0.0000001,
           "读取日涨跌幅");
+    Check(quotes["EURUSD"].description == "Euro vs US Dollar",
+          "读取标的描述");
     Check(fxprice::FormatQuoteValue(quotes["EURUSD"]) ==
-              L"买 1.15831 卖 1.15857 中 1.15844 -0.58%",
+              L"买 1.15823 卖 1.15829 中 1.15826 -0.61%",
           "格式化完整买卖行情");
-    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"]) == L"1.15844 -0.58%",
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"]) == L"1.15826 -0.61%",
           "格式化汇总行情");
-    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"]).find(L"EURO / U.S. DOLLAR") !=
+    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"]).find(L"Euro vs US Dollar") !=
               std::wstring::npos,
           "详情包含标的描述");
-    Check(!fxprice::ParseScannerResponse(
-              R"({"totalCount":1,"data":[{"s":"FX_IDC:EURUSD","d":["EURUSD","EUR/USD",null,null,null]}]})",
+
+    const std::string noMid = R"({"EURUSD":{"symbol":"EURUSD","bid":1.10,"ask":1.12,
+        "dayDiffPercent":0.5,"description":"Euro vs US Dollar"}})";
+    quotes.clear();
+    Check(fxprice::ParseLatestResponse(noMid, quotes, error),
+          "解析缺少 mid 字段的响应");
+    Check(std::abs(quotes["EURUSD"].midpoint - 1.11) < 0.0000001,
+          "缺少 mid 时按买卖价计算中间价");
+    Check(!fxprice::ParseLatestResponse(
+              R"({"EURUSD":{"symbol":"EURUSD","bid":null,"ask":1.12}})",
               quotes, error),
-          "拒绝缺少买卖价的响应");
+          "拒绝缺少买价的响应");
+    Check(!fxprice::ParseLatestResponse(R"([])", quotes, error),
+          "拒绝非对象响应");
+    Check(!fxprice::ParseLatestResponse(
+              R"({"EURUSD":{"symbol":"EURUSD","bid":0,"ask":0}})",
+              quotes, error),
+          "拒绝无效零价响应");
+    quotes.clear();
+    Check(fxprice::ParseLatestResponse(
+              R"({"EURUSD":{"symbol":"EURUSD","bid":1.10,"ask":1.12},
+                  "INVALIDXYZ":{"symbol":"INVALIDXYZ","bid":1.0,"ask":1.1}})",
+              quotes, error) && quotes.size() == 1,
+          "跳过服务端返回的非法标的");
 
     FakeTransport transport;
     transport.responseBody = response;
-    fxprice::ScannerClient client(transport);
+    fxprice::BiquoteClient client(transport);
     quotes.clear();
     Check(client.Fetch({L"EURUSD", L"USDJPY"}, quotes, error),
           "通过注入传输层获取行情");
-    Check(transport.lastHost == L"scanner.tradingview.com" &&
-              transport.lastPath == L"/forex/scan",
-          "请求 TradingView Forex Scanner 地址");
-    Check(transport.lastBody.find("FX_IDC:EURUSD") != std::string::npos,
-          "客户端发送外汇 ticker");
+    Check(transport.lastHost == L"biquote.io",
+          "请求 biquote.io 主机");
+    Check(transport.lastPath == L"/api/latest?symbols=EURUSD&symbols=USDJPY",
+          "请求批量行情路径");
+    Check(quotes.size() == 2, "客户端解析批量行情");
+    quotes.clear();
+    Check(!client.Fetch({L"!!", L""}, quotes, error) &&
+              error.find("没有有效的交易对") != std::string::npos,
+          "全无效标的时不发请求并报错");
 
     wchar_t temporaryPath[MAX_PATH]{};
     GetTempPathW(MAX_PATH, temporaryPath);

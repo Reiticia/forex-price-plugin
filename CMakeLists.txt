@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(FxPricePlugin VERSION 0.1.0 LANGUAGES CXX)
+project(FxPricePlugin VERSION 0.2.0 LANGUAGES CXX)
 
 if(NOT WIN32)
     message(FATAL_ERROR "FxPricePlugin 仅支持 Windows。")
@@ -13,7 +13,7 @@ add_library(FxPricePlugin SHARED
     src/MarketData.cpp
     src/OptionsWindow.cpp
     src/Quote.cpp
-    src/ScannerClient.cpp
+    src/BiquoteClient.cpp
 )
 target_include_directories(FxPricePlugin PRIVATE src)
 target_compile_features(FxPricePlugin PRIVATE cxx_std_17)
@@ -31,7 +31,7 @@ if(BUILD_TESTING)
         src/Config.cpp
         src/MarketData.cpp
         src/Quote.cpp
-        src/ScannerClient.cpp
+        src/BiquoteClient.cpp
     )
     target_include_directories(FxPriceTests PRIVATE src)
     target_compile_features(FxPriceTests PRIVATE cxx_std_17)
@@ -46,7 +46,7 @@ if(BUILD_TESTING)
         tests/LiveSmoke.cpp
         src/MarketData.cpp
         src/Quote.cpp
-        src/ScannerClient.cpp
+        src/BiquoteClient.cpp
     )
     target_include_directories(FxPriceLiveSmoke PRIVATE src)
     target_compile_features(FxPriceLiveSmoke PRIVATE cxx_std_17)

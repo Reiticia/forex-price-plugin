@@ -3,7 +3,7 @@
 #include "Module.h"
 #include "OptionsWindow.h"
 #include "Quote.h"
-#include "ScannerClient.h"
+#include "BiquoteClient.h"
 
 #include <Windows.h>
 
@@ -128,7 +128,7 @@ const wchar_t* FxPricePlugin::GetInfo(PluginInfoIndex index)
         return L"无需账户或 API Key，显示外汇买一价、卖一价、中间价和日涨跌幅";
     case TMI_AUTHOR: return L"Reiticia";
     case TMI_COPYRIGHT: return L"Copyright (C) 2026";
-    case TMI_VERSION: return L"0.1.0";
+    case TMI_VERSION: return L"0.2.0";
     case TMI_URL: return L"https://github.com/Reiticia/fx-price-plugin";
     default: return L"";
     }
@@ -209,7 +209,7 @@ void FxPricePlugin::ApplyPendingResult()
         const auto found = result.quotes.find(symbol);
         const Quote* quote = found == result.quotes.end() ? nullptr : &found->second;
         const std::wstring error = result.success
-            ? L"TradingView 未返回该标的" : requestError;
+            ? L"biquote 未返回该标的" : requestError;
         UpdateItem(index, quote, error);
     }
     RebuildAggregateAndTooltip();
@@ -251,7 +251,7 @@ void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generati
     try
     {
         WinHttpTransport transport;
-        ScannerClient client(transport);
+        BiquoteClient client(transport);
         result.success = client.Fetch(settings.symbols, result.quotes, result.error);
     }
     catch (const std::exception& exception)
@@ -296,7 +296,7 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
     PriceItem& aggregate = items_[0];
     aggregate.value_.clear();
     aggregate.sample_.clear();
-    tooltip_ = L"TradingView FX_IDC 外汇行情";
+    tooltip_ = L"biquote.io 外汇行情";
     for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
     {
         const PriceItem& item = items_[index + 1];

@@ -1,5 +1,5 @@
+#include "BiquoteClient.h"
 #include "Quote.h"
-#include "ScannerClient.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -7,10 +7,10 @@
 int main()
 {
     fxprice::WinHttpTransport transport;
-    fxprice::ScannerClient client(transport);
+    fxprice::BiquoteClient client(transport);
     std::unordered_map<std::string, fxprice::Quote> quotes;
     std::string error;
-    if (!client.Fetch({L"EURUSD"}, quotes, error))
+    if (!client.Fetch({L"EURUSD", L"USDJPY"}, quotes, error))
     {
         std::cerr << "Live request failed: " << error << '\n';
         return 1;
