@@ -7,8 +7,8 @@ FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版�
 核心约束：
 
 - 配置 1–8 个外汇交易对；
-- 数据源固定为 biquote.io（无 Key），不提供交易所切换；
-- “显示内容”为全局选项：买一价、卖一价、中间价、日涨跌幅四项可独立勾选；
+- 数据源固定为 biquote.io，不提供交易所切换；
+- “显示内容”为全局选项：任务栏可独立勾选买一价、卖一价、中间价，工具提示可勾选日涨跌幅；
 - 小数位数按交易对独立设置（`SymbolConfig.precision`）：-1 自动推断，0–10 固定；
 - 网络请求必须在后台线程执行；
 - 保留旧显示项 ID 和旧 INI 读取能力。
@@ -72,7 +72,7 @@ struct SymbolConfig
 ```
 
 - 内部代码统一为 6 位大写字母（如 `EURUSD`）；
-- 展示时拆为 `EUR/USD`；
+- 展示时显示为 `EURUSD.s`；
 - `precision` 为该交易对独立的小数位数，自动模式按行情价格文本推断。
 
 ### DisplayOptions
@@ -87,7 +87,7 @@ struct DisplayOptions
 };
 ```
 
-全局显示开关，作用于所有交易对；不包含小数位数（后者按交易对独立）。
+全局显示开关，作用于所有交易对；买一价/卖一价/中间价用于任务栏和工具提示，日涨跌幅仅用于工具提示；不包含小数位数（后者按交易对独立）。
 
 ### Quote
 
@@ -117,7 +117,8 @@ GET https://biquote.io/api/latest?symbols=EURUSD&symbols=GBPUSD
 - `GetItem(0)` 是汇总项，ID 为 `FxPriceSummary`。
 - `GetItem(1..N)` 是各交易对独立项，ID 为 `FxPriceItem0..7`。
 - `GetItemValueText()` 只返回缓存，不能访问网络。
-- 格式化按勾选字段动态拼装：`买:1.15823 卖:1.15829 中:1.15826 涨跌:-0.61%`。
+- 任务栏标的名显示为 `EURUSD.s`；独立项采用自绘以绕过 TrafficMonitor 按 ItemId 缓存旧标签的问题。
+- 任务栏格式化只拼装勾选的价格字段：`买:1.15823 卖:1.15829 中:1.15826`；日涨跌幅只在工具提示中显示。
 
 ## 8. 配置文件
 
@@ -142,7 +143,7 @@ Precision1=-1
 规则：
 
 - `RefreshSeconds` 范围为 2–300；
-- `ShowBid/ShowAsk/ShowMid/ShowChange` 为全局显示开关（0/1）；
+- `ShowBid/ShowAsk/ShowMid/ShowChange` 为全局显示开关（0/1），其中 `ShowChange` 只影响工具提示；
 - `SymbolN` 为该交易对代码，`PrecisionN` 为该交易对的小数位数（-1 自动，0–10 固定）；
 - 新配置缺少 `PrecisionN` 时兼容读取旧版 `General.DisplayPrecision`；两者都缺失或精度值非法时回退 -1（自动推断）；
 - `Count` 范围为 1–8。

@@ -207,7 +207,7 @@ void OptionsWindow::CreateControls()
                                    WS_TABSTOP | CBS_DROPDOWNLIST,
                                    318, kControlY, 180, 120, kSourceCombo);
     SendMessageW(source, CB_ADDSTRING, 0,
-                 reinterpret_cast<LPARAM>(L"biquote.io（无 Key）"));
+                 reinterpret_cast<LPARAM>(L"biquote.io"));
     SendMessageW(source, CB_SETCURSEL, 0, 0);
     EnableWindow(source, FALSE);
 
@@ -226,8 +226,8 @@ void OptionsWindow::CreateControls()
                           334, 264, 70, 25, kRefreshEdit);
     AddControl(window_, L"STATIC", L"秒（2–300）", 0, 410, 268, 100, 20, -1);
 
-    // "显示内容"改为可勾选的四个字段，逐项独立控制。
-    AddControl(window_, L"STATIC", L"显示内容", 0, 18, 302, kLabelWidth, 20, -1);
+    // 任务栏仅显示价格字段；日涨跌幅只用于工具提示。
+    AddControl(window_, L"STATIC", L"任务栏内容", 0, 18, 302, kLabelWidth, 20, -1);
     showBid_ = AddControl(window_, L"BUTTON", L"买一价",
                           WS_TABSTOP | BS_AUTOCHECKBOX,
                           94, 298, 78, 22, kShowBid);
@@ -237,7 +237,7 @@ void OptionsWindow::CreateControls()
     showMid_ = AddControl(window_, L"BUTTON", L"中间价",
                           WS_TABSTOP | BS_AUTOCHECKBOX,
                           262, 298, 78, 22, kShowMid);
-    showChange_ = AddControl(window_, L"BUTTON", L"日涨跌幅",
+    showChange_ = AddControl(window_, L"BUTTON", L"提示日涨跌",
                              WS_TABSTOP | BS_AUTOCHECKBOX,
                              346, 298, 104, 22, kShowChange);
     SendMessageW(showBid_, BM_SETCHECK, draft_.display.showBid ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -258,7 +258,7 @@ void OptionsWindow::CreateControls()
 
     status_ = AddControl(
         window_, L"STATIC",
-        L"输入如 EUR/USD；EUR-USD、eurusd 会自动规范化。",
+        L"输入如 EURUSD.s、EUR/USD；会自动规范化。",
         0, 18, 392, 610, 22, kStatusText);
     AddControl(window_, L"BUTTON", L"确定",
                WS_TABSTOP | BS_DEFPUSHBUTTON, 454, 434, 88, 29, IDOK);
@@ -275,7 +275,7 @@ void OptionsWindow::RefreshList(int selection)
     for (const SymbolConfig& symbol : draft_.symbols)
     {
         const std::wstring caption = DisplaySymbol(symbol.code) +
-                                     L"    biquote.io（无 Key）";
+                                     L"    biquote.io";
         SendMessageW(list_, LB_ADDSTRING, 0,
                      reinterpret_cast<LPARAM>(caption.c_str()));
     }
@@ -301,7 +301,7 @@ void OptionsWindow::LoadSelection()
         SetWindowTextW(precision_, std::to_wstring(symbol.precision).c_str());
     else
         SetWindowTextW(precision_, L"");
-    SetStatus(L"修改后点击“更新选中项”；新增交易对请点击“添加新标的”。");
+    SetStatus(L"修改后可点击“更新选中项”，点击“确定”也会保存当前编辑。");
 }
 
 int OptionsWindow::ReadPrecisionInput() const
@@ -329,7 +329,7 @@ void OptionsWindow::AddNew()
     const SymbolConfig symbol = ReadSymbolConfig();
     if (!IsValidSymbol(symbol.code))
     {
-        SetStatus(L"交易对格式无效：请输入两个三位货币代码，例如 EUR/USD。 ");
+        SetStatus(L"交易对格式无效：请输入两个三位货币代码，例如 EURUSD.s 或 EUR/USD。 ");
         MessageBeep(MB_ICONWARNING);
         return;
     }
@@ -372,7 +372,7 @@ void OptionsWindow::UpdateSelected()
     const SymbolConfig symbol = ReadSymbolConfig();
     if (!IsValidSymbol(symbol.code))
     {
-        SetStatus(L"交易对格式无效：请输入两个三位货币代码，例如 EUR/USD。 ");
+        SetStatus(L"交易对格式无效：请输入两个三位货币代码，例如 EURUSD.s 或 EUR/USD。 ");
         MessageBeep(MB_ICONWARNING);
         return;
     }
@@ -427,6 +427,37 @@ void OptionsWindow::Accept()
         SetStatus(L"请至少添加一个外汇交易对。 ");
         MessageBeep(MB_ICONWARNING);
         return;
+    }
+
+    const int selected = SelectedIndex();
+    if (selected >= 0 && selected < static_cast<int>(draft_.symbols.size()))
+    {
+        const SymbolConfig symbol = ReadSymbolConfig();
+        if (!IsValidSymbol(symbol.code))
+        {
+            SetStatus(L"交易对格式无效：请输入两个三位货币代码，例如 EURUSD.s 或 EUR/USD。 ");
+            MessageBeep(MB_ICONWARNING);
+            return;
+        }
+        if (symbol.precision == -2)
+        {
+            SetStatus(L"小数位数必须是 0 到 10 之间的整数，或留空为自动判断。 ");
+            SetFocus(precision_);
+            MessageBeep(MB_ICONWARNING);
+            return;
+        }
+        const auto duplicate = std::find_if(draft_.symbols.begin(), draft_.symbols.end(),
+                                            [&](const SymbolConfig& existing) {
+                                                return existing.code == symbol.code;
+                                            });
+        if (duplicate != draft_.symbols.end() &&
+            duplicate != draft_.symbols.begin() + selected)
+        {
+            SetStatus(L"该交易对已经在监控列表中。 ");
+            MessageBeep(MB_ICONWARNING);
+            return;
+        }
+        draft_.symbols[static_cast<std::size_t>(selected)] = symbol;
     }
 
     std::array<wchar_t, 16> value{};

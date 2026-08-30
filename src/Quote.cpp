@@ -43,6 +43,8 @@ std::wstring NormalizeSymbol(std::wstring value)
     std::transform(value.begin(), value.end(), value.begin(), [](wchar_t character) {
         return static_cast<wchar_t>(std::towupper(character));
     });
+    if (value.size() > 2 && value.substr(value.size() - 2) == L".S")
+        value.erase(value.size() - 2);
     return value;
 }
 
@@ -57,7 +59,7 @@ bool IsValidSymbol(const std::wstring& value)
 std::wstring DisplaySymbol(const std::wstring& value)
 {
     if (!IsValidSymbol(value)) return value;
-    return value.substr(0, 3) + L"/" + value.substr(3);
+    return value + L".s";
 }
 
 std::string WideToAscii(const std::wstring& value)
@@ -86,6 +88,18 @@ std::wstring FormatPercentage(const std::optional<double>& value)
     return stream.str();
 }
 
+std::wstring FormatSampleNumber(int precision)
+{
+    const int effective = std::clamp(precision >= 0 ? precision : 5, 0, 10);
+    std::wstring result = L"88888";
+    if (effective > 0)
+    {
+        result += L'.';
+        result.append(static_cast<std::size_t>(effective), L'8');
+    }
+    return result;
+}
+
 std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options, int precision)
 {
     const int effective = precision >= 0 ? precision : quote.precision;
@@ -97,8 +111,6 @@ std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options,
                          FormatNumber(quote.ask, effective));
     ValueBuilder::Append(result, first, options.showMid, L"中",
                          FormatNumber(quote.midpoint, effective));
-    ValueBuilder::Append(result, first, options.showChange, L"涨跌",
-                         FormatPercentage(quote.dailyChangePercent));
     return result;
 }
 
@@ -124,11 +136,6 @@ std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& option
     }
     std::wstring result;
     if (hasPrimary) result = FormatNumber(primary, effective);
-    if (options.showChange)
-    {
-        if (!result.empty()) result += L' ';
-        result += FormatPercentage(quote.dailyChangePercent);
-    }
     return result;
 }
 
@@ -157,15 +164,12 @@ std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options
 
 std::wstring FormatQuoteSample(const DisplayOptions& options, int precision)
 {
-    const int effective = precision >= 0 ? precision : 5;
-    const std::wstring placeholder = FormatNumber(0.0, effective);
-    const std::wstring changePlaceholder = L"+0.00%";
+    const std::wstring placeholder = FormatSampleNumber(precision);
     std::wstring result;
     bool first = true;
     ValueBuilder::Append(result, first, options.showBid, L"买", placeholder);
     ValueBuilder::Append(result, first, options.showAsk, L"卖", placeholder);
     ValueBuilder::Append(result, first, options.showMid, L"中", placeholder);
-    ValueBuilder::Append(result, first, options.showChange, L"涨跌", changePlaceholder);
     return result;
 }
 } // namespace fxprice

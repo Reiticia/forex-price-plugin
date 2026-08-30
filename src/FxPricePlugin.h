@@ -23,6 +23,10 @@ public:
     const wchar_t* GetItemLableText() const override { return label_.c_str(); }
     const wchar_t* GetItemValueText() const override { return value_.c_str(); }
     const wchar_t* GetItemValueSampleText() const override { return sample_.c_str(); }
+    bool IsCustomDraw() const override { return customDraw_; }
+    int GetItemWidth() const override { return customDraw_ ? 320 : 0; }
+    int GetItemWidthEx(void* hdc) const override;
+    void DrawItem(void* hdc, int x, int y, int width, int height, bool) override;
 
 private:
     friend class FxPricePlugin;
@@ -31,8 +35,9 @@ private:
     std::wstring label_{L"外汇: "};
     std::wstring value_{L"--"};
     std::wstring summary_{L"--"};
-    std::wstring sample_{L"买 0.00000 卖 0.00000 中 0.00000 +00.00%"};
+    std::wstring sample_{L"买:88888.88888 卖:88888.88888 中:88888.88888"};
     std::wstring detail_{L"等待行情"};
+    bool customDraw_{};
 };
 
 // 线程模型：items_ 与 tooltip_ 只在 TrafficMonitor 的 UI 线程读写（宿主
@@ -61,6 +66,8 @@ public:
     void OnPluginCommand(int commandIndex, void*, void*) override;
 
 private:
+    friend class PriceItem;
+
     struct PendingResult
     {
         unsigned long long generation{};
@@ -91,6 +98,9 @@ private:
     std::atomic<bool> workerRunning_{};
     std::atomic<bool> shuttingDown_{};
     std::atomic<unsigned long long> generation_{};
+    std::atomic<bool> drawingTaskbar_{};
+    std::atomic<unsigned long> labelTextColor_{};
+    std::atomic<unsigned long> valueTextColor_{};
     std::chrono::steady_clock::time_point nextRefresh_{};
 };
 } // namespace fxprice

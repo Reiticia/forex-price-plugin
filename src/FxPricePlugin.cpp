@@ -8,6 +8,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cwchar>
 #include <exception>
 #include <utility>
 #include <vector>
@@ -38,21 +39,71 @@ Settings NormalizeSettings(Settings settings)
     return settings;
 }
 
-// 汇总行示例文本：主价格占位 + （勾选时的）涨跌幅占位，精度随配置。
-std::wstring SummarySample(const DisplayOptions& options, int precision)
+std::wstring SampleNumber(int precision)
 {
-    const int effective = precision >= 0 ? precision : 5;
-    std::wstring result;
-    if (options.showMid || options.showBid || options.showAsk)
-        result = FormatNumber(0.0, effective);
-    if (options.showChange)
+    const int effective = std::clamp(precision >= 0 ? precision : 5, 0, 10);
+    std::wstring result = L"88888";
+    if (effective > 0)
     {
-        if (!result.empty()) result += L' ';
-        result += L"+0.00%";
+        result += L'.';
+        result.append(static_cast<std::size_t>(effective), L'8');
     }
     return result;
 }
+
+// 汇总行示例文本：主价格占位，精度随配置。
+std::wstring SummarySample(const DisplayOptions& options, int precision)
+{
+    std::wstring result;
+    if (options.showMid || options.showBid || options.showAsk)
+        result = SampleNumber(precision);
+    return result;
+}
 } // namespace
+
+int PriceItem::GetItemWidthEx(void* hdc) const
+{
+    if (!customDraw_ || !hdc) return 0;
+    const std::wstring sample = label_ + sample_;
+    SIZE size{};
+    return GetTextExtentPoint32W(static_cast<HDC>(hdc), sample.c_str(),
+                                 static_cast<int>(sample.size()), &size)
+        ? size.cx : 0;
+}
+
+void PriceItem::DrawItem(void* hdc, int x, int y, int width, int height, bool)
+{
+    if (!customDraw_ || !hdc || width <= 0 || height <= 0) return;
+
+    HDC deviceContext = static_cast<HDC>(hdc);
+    const int saved = SaveDC(deviceContext);
+    SetBkMode(deviceContext, TRANSPARENT);
+
+    const FxPricePlugin& plugin = FxPricePlugin::Instance();
+    const COLORREF valueColor = plugin.drawingTaskbar_.load()
+        ? static_cast<COLORREF>(plugin.valueTextColor_.load())
+        : GetTextColor(deviceContext);
+    const COLORREF labelColor = plugin.drawingTaskbar_.load()
+        ? static_cast<COLORREF>(plugin.labelTextColor_.load())
+        : valueColor;
+
+    RECT labelRect{x, y, x + width, y + height};
+    SIZE labelSize{};
+    GetTextExtentPoint32W(deviceContext, label_.c_str(), static_cast<int>(label_.size()),
+                          &labelSize);
+    labelRect.right = (std::min)(labelRect.right, labelRect.left + labelSize.cx);
+    SetTextColor(deviceContext, labelColor);
+    DrawTextW(deviceContext, label_.c_str(), static_cast<int>(label_.size()), &labelRect,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    const LONG valueLeft = (std::min)(static_cast<LONG>(x) + labelSize.cx,
+                                      static_cast<LONG>(x + width));
+    RECT valueRect{valueLeft, y, x + width, y + height};
+    SetTextColor(deviceContext, valueColor);
+    DrawTextW(deviceContext, value_.c_str(), static_cast<int>(value_.size()), &valueRect,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (saved != 0) RestoreDC(deviceContext, saved);
+}
 
 FxPricePlugin& FxPricePlugin::Instance()
 {
@@ -65,11 +116,14 @@ FxPricePlugin::FxPricePlugin()
     items_[0].id_ = L"FxPriceSummary";
     items_[0].name_ = L"外汇行情汇总";
     items_[0].label_ = L"外汇: ";
-    items_[0].sample_ = L"EUR/USD 0.00000 +00.00%";
+    items_[0].sample_ = L"EURUSD.s 88888.88888";
     for (std::size_t index = 0; index < kMaxSymbols; ++index)
     {
         items_[index + 1].id_ = L"FxPriceItem" + std::to_wstring(index);
         items_[index + 1].name_ = L"外汇行情 " + std::to_wstring(index + 1);
+        // TrafficMonitor 会按 ItemId 缓存标签。标的会变化，因此独立项由
+        // 插件自绘，确保任务栏始终使用当前配置的标的名称。
+        items_[index + 1].customDraw_ = true;
     }
     ApplySettings(settings_);
 }
@@ -130,7 +184,7 @@ const wchar_t* FxPricePlugin::GetInfo(PluginInfoIndex index)
     {
     case TMI_NAME: return L"外汇行情";
     case TMI_DESCRIPTION:
-        return L"无需账户或 API Key，显示外汇买一价、卖一价、中间价和日涨跌幅";
+        return L"无需账户或 API Key，显示外汇买一价、卖一价、中间价，工具提示含日涨跌幅";
     case TMI_AUTHOR: return L"Reiticia";
     case TMI_COPYRIGHT: return L"Copyright (C) 2026";
     case TMI_VERSION: return L"0.4.0";
@@ -141,11 +195,28 @@ const wchar_t* FxPricePlugin::GetInfo(PluginInfoIndex index)
 
 void FxPricePlugin::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
 {
-    if (index == EI_CONFIG_DIR && data && *data)
+    if (!data) return;
+    switch (index)
     {
-        config_.SetDirectory(data);
-        ApplySettings(config_.Load());
-        StartRefresh(true);
+    case EI_CONFIG_DIR:
+        if (*data)
+        {
+            config_.SetDirectory(data);
+            ApplySettings(config_.Load());
+            StartRefresh(true);
+        }
+        break;
+    case EI_DRAW_TASKBAR_WND:
+        drawingTaskbar_ = std::wcstol(data, nullptr, 10) != 0;
+        break;
+    case EI_LABEL_TEXT_COLOR:
+        labelTextColor_ = std::wcstoul(data, nullptr, 10);
+        break;
+    case EI_VALUE_TEXT_COLOR:
+        valueTextColor_ = std::wcstoul(data, nullptr, 10);
+        break;
+    default:
+        break;
     }
 }
 
@@ -186,6 +257,7 @@ void FxPricePlugin::ApplySettings(Settings settings)
             item.summary_ = L"--";
             item.sample_ = FormatQuoteSample(settings_.display,
                                              settings_.symbols[index].precision);
+            if (item.sample_.empty()) item.sample_ = L"--";
             item.detail_ = L"等待行情";
         }
         items_[0].value_ = L"等待行情";
@@ -330,9 +402,10 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
             aggregate.sample_ += L" | ";
         }
         aggregate.value_ += display + L" " + item.summary_;
-        aggregate.sample_ += display + L" " +
-                             SummarySample(settings_.display,
-                                           settings_.symbols[index].precision);
+        std::wstring sample = SummarySample(settings_.display,
+                                            settings_.symbols[index].precision);
+        if (sample.empty()) sample = L"--";
+        aggregate.sample_ += display + L" " + sample;
         tooltip_ += L"\n" + display + L"：" + item.detail_;
     }
     tooltip_ += L"\n涨跌幅为相对前收的日涨跌，并非严格滚动 24 小时。";

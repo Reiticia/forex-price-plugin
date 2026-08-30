@@ -52,6 +52,10 @@ int main()
           "规范化斜杠分隔的外汇标的");
     Check(fxprice::NormalizeSymbol(L"gbp-usd") == L"GBPUSD",
           "规范化横杠分隔的外汇标的");
+    Check(fxprice::NormalizeSymbol(L"EURUSD.s") == L"EURUSD",
+          "规范化显示后缀的外汇标的");
+    Check(fxprice::DisplaySymbol(L"EURUSD") == L"EURUSD.s",
+          "按任务栏格式显示外汇标的");
     Check(fxprice::IsValidSymbol(L"USDJPY"), "接受六位外汇标的");
     Check(!fxprice::IsValidSymbol(L"EUR_USD"), "拒绝未规范化标的");
 
@@ -119,24 +123,24 @@ int main()
           "读取标的描述");
     fxprice::DisplayOptions displayAll;
     Check(fxprice::FormatQuoteValue(quotes["EURUSD"], displayAll, -1) ==
-              L"买:1.15823 卖:1.15829 中:1.15826 涨跌:-0.61%",
-          "格式化完整买卖行情");
+              L"买:1.15823 卖:1.15829 中:1.15826",
+          "格式化完整买卖行情不含涨跌幅");
     Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], displayAll, -1) ==
-              L"1.15826 -0.61%",
-          "格式化汇总行情");
+              L"1.15826",
+          "格式化汇总行情不含涨跌幅");
     Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], displayAll, -1).find(L"Euro vs US Dollar") !=
               std::wstring::npos,
           "详情包含标的描述");
 
-    // 仅显示中间价与涨跌幅，并固定两位小数。
+    // 仅显示中间价，并固定两位小数；涨跌幅只保留在详情/工具提示中。
     fxprice::DisplayOptions partial;
     partial.showBid = false;
     partial.showAsk = false;
     Check(fxprice::FormatQuoteValue(quotes["EURUSD"], partial, 2) ==
-              L"中:1.16 涨跌:-0.61%",
+              L"中:1.16",
           "按勾选字段与固定精度格式化");
-    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], partial, 2) == L"1.16 -0.61%",
-          "汇总仅含中间价与涨跌幅");
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], partial, 2) == L"1.16",
+          "汇总仅含中间价");
     // 仅显示买价，保留三位小数。
     fxprice::DisplayOptions bidOnly;
     bidOnly.showAsk = false;

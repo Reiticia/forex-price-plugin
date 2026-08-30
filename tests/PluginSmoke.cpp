@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <cwchar>
 #include <iostream>
 
 int wmain(int argumentCount, wchar_t* arguments[])
@@ -24,7 +25,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
     bool valid = plugin && plugin->GetAPIVersion() == 8 &&
                  plugin->GetInfo(ITMPlugin::TMI_NAME) &&
                  *plugin->GetInfo(ITMPlugin::TMI_NAME) &&
-                 plugin->GetItem(0) && plugin->GetItem(1);
+                 plugin->GetItem(0) && plugin->GetItem(1) &&
+                 std::wcscmp(plugin->GetItem(1)->GetItemLableText(), L"EURUSD.s: ") == 0 &&
+                 plugin->GetItem(1)->IsCustomDraw();
     if (!FreeLibrary(module)) valid = false;
     if (!valid)
     {
