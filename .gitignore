@@ -1,0 +1,11 @@
+build*/
+.vs/
+.idea/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+FxPrice.ini
+.reference-*/
+*-search.json
+trafficmonitor-tree.json
