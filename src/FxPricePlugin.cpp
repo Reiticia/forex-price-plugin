@@ -48,12 +48,13 @@ Settings NormalizeSettings(Settings settings)
     return settings;
 }
 
-// 汇总行示例文本：主价格占位 + （勾选时的）涨跌幅占位。
+// 汇总行示例文本：主价格占位 + （勾选时的）涨跌幅占位，精度随配置。
 std::wstring SummarySample(const DisplayOptions& options)
 {
+    const int precision = options.precision >= 0 ? options.precision : 5;
     std::wstring result;
     if (options.showMid || options.showBid || options.showAsk)
-        result = L"0.00000";
+        result = FormatNumber(0.0, precision);
     if (options.showChange)
     {
         if (!result.empty()) result += L' ';

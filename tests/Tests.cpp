@@ -140,6 +140,25 @@ int main()
     Check(fxprice::FormatQuoteValue(quotes["EURUSD"], bidOnly) == L"买:1.158",
           "仅显示买价并按三位小数格式化");
 
+    // 详情尾部悬空分隔：全部取消勾选时为空，仅显示买价时以买价结尾。
+    fxprice::DisplayOptions detailOff;
+    detailOff.showBid = false;
+    detailOff.showAsk = false;
+    detailOff.showMid = false;
+    detailOff.showChange = false;
+    Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], detailOff).empty(),
+          "全部取消勾选时详情为空");
+    fxprice::DisplayOptions detailOne;
+    detailOne.showAsk = false;
+    detailOne.showMid = false;
+    detailOne.showChange = false;
+    const std::wstring detailText =
+        fxprice::FormatQuoteDetail(quotes["EURUSD"], detailOne);
+    Check(detailText.find(L"Euro vs US Dollar |") != std::wstring::npos &&
+              detailText.size() >= 7 &&
+              detailText.compare(detailText.size() - 7, 7, L"1.15823") == 0,
+          "仅显示买价时不产生尾部悬空分隔");
+
     const std::string noMid = R"({"EURUSD":{"symbol":"EURUSD","bid":1.10,"ask":1.12,
         "dayDiffPercent":0.5,"description":"Euro vs US Dollar"}})";
     quotes.clear();

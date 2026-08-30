@@ -136,8 +136,6 @@ std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options
 {
     const int precision = options.precision >= 0 ? options.precision : quote.precision;
     std::wstring result;
-    if (!quote.description.empty())
-        result += AsciiToWide(quote.description) + L" | ";
     bool first = true;
     auto append = [&](bool enabled, const wchar_t* label, const std::wstring& value) {
         if (!enabled) return;
@@ -151,6 +149,9 @@ std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options
     append(options.showAsk, L"卖一", FormatNumber(quote.ask, precision));
     append(options.showMid, L"中间价", FormatNumber(quote.midpoint, precision));
     append(options.showChange, L"日涨跌", FormatPercentage(quote.dailyChangePercent));
+    // 仅当至少显示一个字段时才添加描述前缀，避免产生"desc | "尾部悬空。
+    if (!quote.description.empty() && !result.empty())
+        result = AsciiToWide(quote.description) + L" | " + result;
     return result;
 }
 
