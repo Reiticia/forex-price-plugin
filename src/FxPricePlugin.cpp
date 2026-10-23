@@ -51,12 +51,17 @@ std::wstring SampleNumber(int precision)
     return result;
 }
 
-// 汇总行示例文本：主价格占位，精度随配置。
+// 汇总行示例文本：主价格精度随配置，按勾选预留日涨跌幅宽度。
 std::wstring SummarySample(const DisplayOptions& options, int precision)
 {
     std::wstring result;
     if (options.showMid || options.showBid || options.showAsk)
         result = SampleNumber(precision);
+    if (options.showChange)
+    {
+        if (!result.empty()) result += L' ';
+        result += L"+888.88%";
+    }
     return result;
 }
 } // namespace
@@ -184,7 +189,7 @@ const wchar_t* FxPricePlugin::GetInfo(PluginInfoIndex index)
     {
     case TMI_NAME: return L"外汇行情";
     case TMI_DESCRIPTION:
-        return L"无需账户或 API Key，显示外汇买一价、卖一价、中间价，工具提示含日涨跌幅";
+        return L"无需账户或 API Key，显示外汇买一价、卖一价、中间价及日涨跌幅";
     case TMI_AUTHOR: return L"Reiticia";
     case TMI_COPYRIGHT: return L"Copyright (C) 2026";
     case TMI_VERSION: return L"0.4.0";

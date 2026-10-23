@@ -12,6 +12,7 @@
 #include <iterator>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace
@@ -123,24 +124,24 @@ int main()
           "读取标的描述");
     fxprice::DisplayOptions displayAll;
     Check(fxprice::FormatQuoteValue(quotes["EURUSD"], displayAll, -1) ==
-              L"买:1.15823 卖:1.15829 中:1.15826",
-          "格式化完整买卖行情不含涨跌幅");
+              L"买:1.15823 卖:1.15829 中:1.15826 涨跌:-0.61%",
+          "格式化完整买卖行情及日涨跌幅");
     Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], displayAll, -1) ==
-              L"1.15826",
-          "格式化汇总行情不含涨跌幅");
+              L"1.15826 -0.61%",
+          "格式化汇总行情及日涨跌幅");
     Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], displayAll, -1).find(L"Euro vs US Dollar") !=
               std::wstring::npos,
           "详情包含标的描述");
 
-    // 仅显示中间价，并固定两位小数；涨跌幅只保留在详情/工具提示中。
+    // 仅显示中间价和涨跌幅，价格固定两位小数。
     fxprice::DisplayOptions partial;
     partial.showBid = false;
     partial.showAsk = false;
     Check(fxprice::FormatQuoteValue(quotes["EURUSD"], partial, 2) ==
-              L"中:1.16",
+              L"中:1.16 涨跌:-0.61%",
           "按勾选字段与固定精度格式化");
-    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], partial, 2) == L"1.16",
-          "汇总仅含中间价");
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], partial, 2) == L"1.16 -0.61%",
+          "汇总含中间价和日涨跌幅");
     // 仅显示买价，保留三位小数。
     fxprice::DisplayOptions bidOnly;
     bidOnly.showAsk = false;
@@ -152,6 +153,35 @@ int main()
     Check(fxprice::FormatQuoteValue(quotes["EURUSD"], bidOnly, 0) == L"买:1",
           "固定 0 位时价格取整显示");
 
+    Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], bidOnly, 3) == L"1.158",
+          "关闭涨跌幅后汇总仅显示价格");
+    Check(fxprice::FormatQuoteSample(partial, 2) == L"中:88888.88 涨跌:+888.88%",
+          "示例为涨跌幅预留宽度");
+    Check(fxprice::FormatQuoteSample(bidOnly, 3) == L"买:88888.888",
+          "关闭涨跌幅后示例不预留百分比");
+
+    fxprice::DisplayOptions changeOnly;
+    changeOnly.showBid = false;
+    changeOnly.showAsk = false;
+    changeOnly.showMid = false;
+    fxprice::Quote changeQuote = quotes["EURUSD"];
+    for (const auto& sample : {std::make_pair(0.5, L"+0.50%"),
+                               std::make_pair(0.0, L"+0.00%"),
+                               std::make_pair(-0.5, L"-0.50%")})
+    {
+        changeQuote.dailyChangePercent = sample.first;
+        Check(fxprice::FormatQuoteValue(changeQuote, changeOnly, 0) ==
+                  std::wstring(L"涨跌:") + sample.second &&
+                  fxprice::FormatQuoteSummary(changeQuote, changeOnly, 0) == sample.second,
+              "仅显示涨跌幅时保留正负号和两位小数，无多余分隔");
+    }
+    changeQuote.dailyChangePercent.reset();
+    Check(fxprice::FormatQuoteValue(changeQuote, changeOnly, -1) == L"涨跌:--" &&
+              fxprice::FormatQuoteSummary(changeQuote, changeOnly, -1) == L"--",
+          "缺少涨跌幅时显示占位符");
+    Check(fxprice::FormatQuoteSample(changeOnly, -1) == L"涨跌:+888.88%",
+          "仅显示涨跌幅时示例无多余空格");
+
     // 详情尾部悬空分隔：全部取消勾选时为空，仅显示买价时以买价结尾。
     fxprice::DisplayOptions detailOff;
     detailOff.showBid = false;
@@ -160,6 +190,10 @@ int main()
     detailOff.showChange = false;
     Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], detailOff, -1).empty(),
           "全部取消勾选时详情为空");
+    Check(fxprice::FormatQuoteValue(quotes["EURUSD"], detailOff, -1).empty() &&
+              fxprice::FormatQuoteSummary(quotes["EURUSD"], detailOff, -1).empty() &&
+              fxprice::FormatQuoteSample(detailOff, -1).empty(),
+          "全部取消勾选时任务栏文本和示例为空");
     fxprice::DisplayOptions detailOne;
     detailOne.showAsk = false;
     detailOne.showMid = false;

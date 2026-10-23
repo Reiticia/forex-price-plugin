@@ -111,6 +111,8 @@ std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options,
                          FormatNumber(quote.ask, effective));
     ValueBuilder::Append(result, first, options.showMid, L"中",
                          FormatNumber(quote.midpoint, effective));
+    ValueBuilder::Append(result, first, options.showChange, L"涨跌",
+                         FormatPercentage(quote.dailyChangePercent));
     return result;
 }
 
@@ -136,6 +138,11 @@ std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& option
     }
     std::wstring result;
     if (hasPrimary) result = FormatNumber(primary, effective);
+    if (options.showChange)
+    {
+        if (!result.empty()) result += L' ';
+        result += FormatPercentage(quote.dailyChangePercent);
+    }
     return result;
 }
 
@@ -170,6 +177,7 @@ std::wstring FormatQuoteSample(const DisplayOptions& options, int precision)
     ValueBuilder::Append(result, first, options.showBid, L"买", placeholder);
     ValueBuilder::Append(result, first, options.showAsk, L"卖", placeholder);
     ValueBuilder::Append(result, first, options.showMid, L"中", placeholder);
+    ValueBuilder::Append(result, first, options.showChange, L"涨跌", L"+888.88%");
     return result;
 }
 } // namespace fxprice

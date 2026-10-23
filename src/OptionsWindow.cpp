@@ -226,7 +226,7 @@ void OptionsWindow::CreateControls()
                           334, 264, 70, 25, kRefreshEdit);
     AddControl(window_, L"STATIC", L"秒（2–300）", 0, 410, 268, 100, 20, -1);
 
-    // 任务栏仅显示价格字段；日涨跌幅只用于工具提示。
+    // 勾选字段同时用于任务栏和工具提示。
     AddControl(window_, L"STATIC", L"任务栏内容", 0, 18, 302, kLabelWidth, 20, -1);
     showBid_ = AddControl(window_, L"BUTTON", L"买一价",
                           WS_TABSTOP | BS_AUTOCHECKBOX,
@@ -237,7 +237,7 @@ void OptionsWindow::CreateControls()
     showMid_ = AddControl(window_, L"BUTTON", L"中间价",
                           WS_TABSTOP | BS_AUTOCHECKBOX,
                           262, 298, 78, 22, kShowMid);
-    showChange_ = AddControl(window_, L"BUTTON", L"提示日涨跌",
+    showChange_ = AddControl(window_, L"BUTTON", L"日涨跌幅",
                              WS_TABSTOP | BS_AUTOCHECKBOX,
                              346, 298, 104, 22, kShowChange);
     SendMessageW(showBid_, BM_SETCHECK, draft_.display.showBid ? BST_CHECKED : BST_UNCHECKED, 0);
