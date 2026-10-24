@@ -1,6 +1,7 @@
 #include "BiquoteClient.h"
 #include "Config.h"
 #include "MarketData.h"
+#include "MarketSchedule.h"
 #include "Quote.h"
 
 #include <Windows.h>
@@ -49,6 +50,23 @@ void Check(bool condition, const char* message)
 
 int main()
 {
+    Check(!fxprice::IsWeekendUtc3(5, 20), "UTC 周五 21:00 前仍可刷新");
+    Check(fxprice::IsWeekendUtc3(5, 21), "UTC 周五 21:00 起进入 UTC+3 周六");
+    Check(fxprice::IsWeekendUtc3(5, 23), "UTC 周五晚间必须暂停");
+    Check(fxprice::IsWeekendUtc3(6, 0) && fxprice::IsWeekendUtc3(6, 20) &&
+              fxprice::IsWeekendUtc3(6, 21) && fxprice::IsWeekendUtc3(6, 23),
+          "UTC 周六全天暂停，跨入 UTC+3 周日仍暂停");
+    Check(fxprice::IsWeekendUtc3(0, 0) && fxprice::IsWeekendUtc3(0, 20),
+          "UTC 周日 21:00 前仍暂停");
+    Check(!fxprice::IsWeekendUtc3(0, 21) && !fxprice::IsWeekendUtc3(0, 23),
+          "UTC 周日 21:00 起进入 UTC+3 周一并恢复");
+    for (unsigned day = 1; day <= 4; ++day)
+    {
+        Check(!fxprice::IsWeekendUtc3(day, 0) && !fxprice::IsWeekendUtc3(day, 20) &&
+                  !fxprice::IsWeekendUtc3(day, 21) && !fxprice::IsWeekendUtc3(day, 23),
+              "UTC 周一至周四保持正常刷新");
+    }
+
     Check(fxprice::NormalizeSymbol(L" eur/usd ") == L"EURUSD",
           "规范化斜杠分隔的外汇标的");
     Check(fxprice::NormalizeSymbol(L"gbp-usd") == L"GBPUSD",

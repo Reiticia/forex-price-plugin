@@ -1,6 +1,7 @@
 #include "FxPricePlugin.h"
 
 #include "Module.h"
+#include "MarketSchedule.h"
 #include "OptionsWindow.h"
 #include "Quote.h"
 #include "BiquoteClient.h"
@@ -302,6 +303,27 @@ void FxPricePlugin::StartRefresh(bool force)
 {
     std::lock_guard<std::mutex> refreshLock(refreshMutex_);
     if (shuttingDown_) return;
+
+    // 固定 UTC+3，不使用电脑本地时区或夏令时；UTC 21:00 起为下一天。
+    // 所有刷新入口（包括强制刷新）都遵守周末暂停。
+    SYSTEMTIME utcTime{};
+    GetSystemTime(&utcTime);
+    const bool weekend = IsWeekendUtc3(utcTime.wDayOfWeek, utcTime.wHour);
+    {
+        std::lock_guard<std::mutex> lock(settingsMutex_);
+        if (weekendPaused_ != weekend)
+        {
+            weekendPaused_ = weekend;
+            RebuildAggregateAndTooltip();
+        }
+    }
+    if (weekend)
+    {
+        // 不启动请求、不覆盖已有报价；下一个工作日首次回调即可恢复刷新。
+        nextRefresh_ = std::chrono::steady_clock::time_point{};
+        return;
+    }
+
     const auto now = std::chrono::steady_clock::now();
     if (force) nextRefresh_ = std::chrono::steady_clock::time_point{};
     if (workerRunning_ || now < nextRefresh_) return;
@@ -397,6 +419,8 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
     aggregate.value_.clear();
     aggregate.sample_.clear();
     tooltip_ = L"biquote.io 外汇行情";
+    if (weekendPaused_)
+        tooltip_ += L"\n周末休市，已暂停抓取（UTC+3）；周一 00:00 自动恢复。";
     for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
     {
         const PriceItem& item = items_[index + 1];
