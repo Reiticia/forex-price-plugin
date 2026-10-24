@@ -31,6 +31,7 @@ FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版�
 | `src/FxPricePlugin.*` | 插件入口、显示项、后台调度和格式化 |
 | `src/BiquoteClient.*` | biquote.io 的 WinHTTP 客户端与传输抽象 |
 | `src/MarketData.*` | `/api/latest` 查询串构造与响应解析 |
+| `src/MarketSchedule.h` | 固定 UTC+3 的周末暂停判断 |
 | `src/Quote.*` | 报价结构、符号规范化、精度推断与显示格式化 |
 | `src/Config.*` | 交易对、显示选项、小数位数及 INI 持久化 |
 | `src/OptionsWindow.*` | 纯 Win32 设置窗口 |
@@ -58,6 +59,14 @@ TrafficMonitor::DataRequired
 ```
 
 设置变化时 generation 递增。旧设置启动的迟到响应会被丢弃，避免切换交易对后短暂显示旧数据。
+
+`StartRefresh` 在检查刷新间隔和启动后台线程之前，通过 `GetSystemTime` 读取 UTC：
+UTC 21:00 起将星期顺延一天，以固定 UTC+3 判断周六、周日并直接返回，`force` 不能绕过。
+暂停窗口为 UTC 周五 21:00（含）到周日 21:00（不含），不依赖电脑本地时区或夏令时。
+暂停期间不发起请求、不覆盖已显示的报价，
+工具提示标记暂停状态；下一刷新时间被重置，因此周一首次回调即恢复抓取。进入周末前已发出的
+请求允许完成；周末启动或修改配置后，没有报价缓存的项目保持 `--`。此策略不处理节假日
+或纽约时区的开收盘时刻。
 
 ## 5. 统一数据模型
 
