@@ -30,10 +30,10 @@ int wmain(int argumentCount, wchar_t* arguments[])
     {
         plugin->DataRequired();
         value = plugin->GetItem(1)->GetItemValueText();
-        if (value.find(L"买:") != std::wstring::npos &&
-            value.find(L"卖:") != std::wstring::npos &&
-            value.find(L"中:") != std::wstring::npos &&
-            value.find(L"涨跌:") != std::wstring::npos)
+        if (value.find(L"◀") != std::wstring::npos &&
+            value.find(L"▶") != std::wstring::npos &&
+            value.find(L"≈") != std::wstring::npos &&
+            value.find(L"Δ") != std::wstring::npos)
         {
             complete = true;
             break;

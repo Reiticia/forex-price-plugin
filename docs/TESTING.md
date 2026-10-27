@@ -93,7 +93,7 @@ ctest --test-dir build-win32 -C Release --output-on-failure
 ```
 
 - 加载 DLL，调用 `DataRequired` 触发后台刷新；
-- 校验独立项 value 含 `买:`、`卖:`、`中:`、`涨跌:`；
+- 校验独立项 value 含 `◀`、`▶`、`≈`、`Δ`；
 - 工具提示包含 `日涨跌`。
 
 真实测试最多等待约 20 秒，覆盖 biquote 网络请求往返。

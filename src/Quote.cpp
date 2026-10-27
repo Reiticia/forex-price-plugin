@@ -28,7 +28,7 @@ struct ValueBuilder
         if (!first) result += L' ';
         first = false;
         result += label;
-        result += L':';
+        // 符号直接连接数值，减少任务栏占用宽度。
         result += value;
     }
 };
@@ -105,13 +105,13 @@ std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options,
     const int effective = precision >= 0 ? precision : quote.precision;
     std::wstring result;
     bool first = true;
-    ValueBuilder::Append(result, first, options.showBid, L"买",
+    ValueBuilder::Append(result, first, options.showBid, L"◀",
                          FormatNumber(quote.bid, effective));
-    ValueBuilder::Append(result, first, options.showAsk, L"卖",
+    ValueBuilder::Append(result, first, options.showAsk, L"▶",
                          FormatNumber(quote.ask, effective));
-    ValueBuilder::Append(result, first, options.showMid, L"中",
+    ValueBuilder::Append(result, first, options.showMid, L"≈",
                          FormatNumber(quote.midpoint, effective));
-    ValueBuilder::Append(result, first, options.showChange, L"涨跌",
+    ValueBuilder::Append(result, first, options.showChange, L"Δ",
                          FormatPercentage(quote.dailyChangePercent));
     return result;
 }
@@ -174,10 +174,10 @@ std::wstring FormatQuoteSample(const DisplayOptions& options, int precision)
     const std::wstring placeholder = FormatSampleNumber(precision);
     std::wstring result;
     bool first = true;
-    ValueBuilder::Append(result, first, options.showBid, L"买", placeholder);
-    ValueBuilder::Append(result, first, options.showAsk, L"卖", placeholder);
-    ValueBuilder::Append(result, first, options.showMid, L"中", placeholder);
-    ValueBuilder::Append(result, first, options.showChange, L"涨跌", L"+888.88%");
+    ValueBuilder::Append(result, first, options.showBid, L"◀", placeholder);
+    ValueBuilder::Append(result, first, options.showAsk, L"▶", placeholder);
+    ValueBuilder::Append(result, first, options.showMid, L"≈", placeholder);
+    ValueBuilder::Append(result, first, options.showChange, L"Δ", L"+888.88%");
     return result;
 }
 } // namespace fxprice

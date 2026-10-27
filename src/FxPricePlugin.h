@@ -35,7 +35,7 @@ private:
     std::wstring label_{L"外汇: "};
     std::wstring value_{L"--"};
     std::wstring summary_{L"--"};
-    std::wstring sample_{L"买:88888.88888 卖:88888.88888 中:88888.88888"};
+    std::wstring sample_{L"◀88888.88888 ▶88888.88888 ≈88888.88888"};
     std::wstring detail_{L"等待行情"};
     bool customDraw_{};
 };
