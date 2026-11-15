@@ -137,4 +137,23 @@ bool BiquoteClient::Fetch(const std::vector<std::wstring>& symbols,
         return false;
     return ParseLatestResponse(response, quotes, error);
 }
+
+bool BiquoteClient::ValidateSymbol(const std::wstring& symbol, std::string& error)
+{
+    const std::wstring normalized = NormalizeSymbol(symbol);
+    if (!IsValidSymbol(normalized))
+    {
+        error = "交易对格式无效";
+        return false;
+    }
+    std::unordered_map<std::string, Quote> quotes;
+    if (!Fetch({normalized}, quotes, error)) return false;
+    if (quotes.find(WideToAscii(normalized)) == quotes.end())
+    {
+        error = "该交易对不存在或没有有效的买卖报价";
+        return false;
+    }
+    error.clear();
+    return true;
+}
 } // namespace fxprice

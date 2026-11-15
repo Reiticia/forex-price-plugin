@@ -32,6 +32,9 @@ public:
                std::unordered_map<std::string, Quote>& quotes,
                std::string& error);
 
+    // 仅在目标标的返回有效买卖报价时通过；不能用其他标的的报价代替。
+    bool ValidateSymbol(const std::wstring& symbol, std::string& error);
+
 private:
     IHttpTransport& transport_;
 };

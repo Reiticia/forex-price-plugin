@@ -56,6 +56,23 @@ if(BUILD_TESTING)
     target_link_libraries(FxPriceTests PRIVATE winhttp)
     add_test(NAME FxPriceTests COMMAND FxPriceTests)
 
+    add_executable(FxPriceOptionsTests
+        tests/OptionsTests.cpp
+        src/OptionsWindow.cpp
+        src/MarketData.cpp
+        src/Quote.cpp
+        src/BiquoteClient.cpp
+    )
+    target_include_directories(FxPriceOptionsTests PRIVATE src)
+    target_compile_features(FxPriceOptionsTests PRIVATE cxx_std_17)
+    target_compile_definitions(FxPriceOptionsTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(FxPriceOptionsTests PRIVATE winhttp user32 gdi32)
+    if(MSVC)
+        target_compile_options(FxPriceOptionsTests PRIVATE /utf-8 /W4 /permissive- /EHsc)
+    endif()
+    add_test(NAME FxPriceOptionsTests COMMAND FxPriceOptionsTests)
+    set_tests_properties(FxPriceOptionsTests PROPERTIES TIMEOUT 30)
+
     add_executable(FxPriceLiveSmoke
         tests/LiveSmoke.cpp
         src/MarketData.cpp

@@ -37,6 +37,7 @@ FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版�
 | `src/OptionsWindow.*` | 纯 Win32 设置窗口 |
 | `tests/Tests.cpp` | 解析、格式化、配置单元测试 |
 | `tests/PluginSmoke.cpp` | DLL ABI 冒烟测试 |
+| `tests/OptionsTests.cpp` | 模拟行情传输的 Win32 配置窗口自动化测试 |
 | `tests/LiveSmoke.cpp` | 真实 biquote 请求测试 |
 | `tests/PluginLiveSmoke.cpp` | 加载 DLL 端到端刷新测试 |
 | `tests/OptionsPreview.cpp` | 打开 Win32 配置窗口的人工验收入口 |
@@ -63,10 +64,16 @@ TrafficMonitor::DataRequired
 `StartRefresh` 在检查刷新间隔和启动后台线程之前，通过 `GetSystemTime` 读取 UTC：
 UTC 21:00 起将星期顺延一天，以固定 UTC+3 判断周六、周日并直接返回，`force` 不能绕过。
 暂停窗口为 UTC 周五 21:00（含）到周日 21:00（不含），不依赖电脑本地时区或夏令时。
-暂停期间不发起请求、不覆盖已显示的报价，
+暂停期间不发起行情刷新请求、不覆盖已显示的报价，
 工具提示标记暂停状态；下一刷新时间被重置，因此周一首次回调即恢复抓取。进入周末前已发出的
 请求允许完成；周末启动或修改配置后，没有报价缓存的项目保持 `--`。此策略不处理节假日
 或纽约时区的开收盘时刻。
+
+添加或替换标的的有效性校验独立于刷新调度：`OptionsWindow` 用 `std::async` 调用
+`BiquoteClient::ValidateSymbol`，只在目标标的返回有效买卖报价后提交到草稿。
+窗口定时器在 UI 线程接收结果，校验期间禁止变更列表及保存；取消时等待请求结束后关闭，
+避免后台任务访问已销毁窗口或在 DLL 卸载后继续执行。仅修改精度不查询行情。
+此用户主动校验在周末也可查询最后报价，但不写入刷新缓存。
 
 ## 5. 统一数据模型
 
@@ -117,7 +124,7 @@ GET https://biquote.io/api/latest?symbols=EURUSD&symbols=GBPUSD
 
 - 参数为重复的 `symbols`，不支持逗号分隔；
 - 响应为以标的代码为键的 tick 对象字典；
-- 无效或不存在的交易对会被服务端静默跳过（对应显示项显示 `--`）；
+- 无效或不存在的交易对会被服务端静默跳过，添加/替换校验必须显式确认目标代码出现在有效报价中；旧配置中的无效项仍显示 `--`；
 - 外汇休市时返回 200 与最后一笔报价，`marketState` 为 `closed`，插件照常显示；
 - 匿名限流 15000 次/分钟/IP，远高于插件刷新频率。
 

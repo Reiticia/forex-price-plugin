@@ -26,16 +26,19 @@ public:
     bool Get(const std::wstring& host, const std::wstring& path,
              std::string& response, std::string& error) override
     {
+        ++requests;
         lastHost = host;
         lastPath = path;
         response = responseBody;
-        error.clear();
-        return true;
+        error = succeeds ? std::string{} : "模拟 HTTP 或网络错误";
+        return succeeds;
     }
 
     std::wstring lastHost;
     std::wstring lastPath;
     std::string responseBody;
+    bool succeeds{true};
+    int requests{};
 };
 
 void Check(bool condition, const char* message)
@@ -265,6 +268,37 @@ int main()
     Check(!client.Fetch({L"!!", L""}, quotes, error) &&
               error.find("没有有效的交易对") != std::string::npos,
           "全无效标的时不发请求并报错");
+
+    Check(client.ValidateSymbol(L" eur/usd.s ", error) && error.empty(),
+          "规范化后校验目标标的的有效报价");
+    Check(transport.lastPath == L"/api/latest?symbols=EURUSD",
+          "添加校验只查询目标标的");
+    Check(!client.ValidateSymbol(L"ABCDEF", error) && !error.empty(),
+          "其他标的有报价不能使不存在的目标标的通过校验");
+    const int requestsBeforeInvalid = transport.requests;
+    Check(!client.ValidateSymbol(L"!!", error) &&
+              transport.requests == requestsBeforeInvalid,
+          "非法格式不发起校验请求");
+    for (const std::string& invalidResponse : {
+             std::string("{}"), std::string("not json"),
+             std::string(R"({"EURUSD":null})"),
+             std::string(R"({"EURUSD":{"bid":0,"ask":0}})"),
+             std::string(R"({"EURUSD":{"bid":1.1}})"),
+             std::string(R"({"EURUSD":{"bid":null,"ask":1.2}})"),
+             std::string(R"({"EURUSD":{"bid":-1,"ask":1.2}})")})
+    {
+        transport.responseBody = invalidResponse;
+        Check(!client.ValidateSymbol(L"EURUSD", error) && !error.empty(),
+              "空响应、无效 JSON、缺失或非法报价阻止添加");
+    }
+    transport.succeeds = false;
+    transport.responseBody = response;
+    Check(!client.ValidateSymbol(L"EURUSD", error) &&
+              error == "模拟 HTTP 或网络错误",
+          "网络或 HTTP 失败时拒绝添加并保留错误原因");
+    transport.succeeds = true;
+    Check(client.ValidateSymbol(L"USDJPY", error) && error.empty(),
+          "失败后可重新校验，休市时的有效历史买卖报价也可通过");
 
     wchar_t temporaryPath[MAX_PATH]{};
     GetTempPathW(MAX_PATH, temporaryPath);

@@ -1,11 +1,14 @@
 #include "OptionsWindow.h"
 
+#include "BiquoteClient.h"
 #include "Module.h"
 #include "Quote.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cwchar>
+#include <exception>
 #include <string>
 
 namespace fxprice
@@ -26,6 +29,19 @@ constexpr int kShowAsk = 1010;
 constexpr int kShowMid = 1011;
 constexpr int kShowChange = 1012;
 constexpr int kPrecisionEdit = 1013;
+constexpr UINT_PTR kValidationTimer = 1;
+
+std::wstring Utf8ToWide(const std::string& text)
+{
+    const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                         text.data(), static_cast<int>(text.size()),
+                                         nullptr, 0);
+    if (length <= 0) return L"行情查询失败，请稍后重试。";
+    std::wstring result(static_cast<std::size_t>(length), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                       static_cast<int>(text.size()), result.data(), length);
+    return result;
+}
 
 HWND AddControl(HWND parent, const wchar_t* className, const wchar_t* text,
                 DWORD style, int x, int y, int width, int height, int id)
@@ -43,9 +59,10 @@ HWND AddControl(HWND parent, const wchar_t* className, const wchar_t* text,
 }
 } // namespace
 
-bool OptionsWindow::Show(HWND parent, Settings& settings)
+bool OptionsWindow::Show(HWND parent, Settings& settings, IHttpTransport* transport)
 {
-    OptionsWindow dialog(settings);
+    WinHttpTransport defaultTransport;
+    OptionsWindow dialog(settings, transport ? *transport : defaultTransport);
     if (!dialog.Create(parent))
     {
         MessageBoxW(parent, L"无法创建选项窗口。", L"外汇行情", MB_OK | MB_ICONERROR);
@@ -147,6 +164,7 @@ LRESULT OptionsWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         CreateControls();
         return 0;
     case WM_COMMAND:
+        if (validation_.valid() && LOWORD(wParam) != IDCANCEL) return 0;
         switch (LOWORD(wParam))
         {
         case kSymbolList:
@@ -165,14 +183,17 @@ LRESULT OptionsWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             Accept();
             return 0;
         case IDCANCEL:
-            DestroyWindow(window_);
+            Close();
             return 0;
         default:
             break;
         }
         break;
+    case WM_TIMER:
+        if (wParam == kValidationTimer) CompleteValidation();
+        return 0;
     case WM_CLOSE:
-        DestroyWindow(window_);
+        Close();
         return 0;
     case WM_DESTROY:
         window_ = nullptr;
@@ -259,7 +280,7 @@ void OptionsWindow::CreateControls()
     status_ = AddControl(
         window_, L"STATIC",
         L"输入如 EURUSD.s、EUR/USD；会自动规范化。",
-        0, 18, 392, 610, 22, kStatusText);
+        0, 18, 392, 610, 36, kStatusText);
     AddControl(window_, L"BUTTON", L"确定",
                WS_TABSTOP | BS_DEFPUSHBUTTON, 454, 434, 88, 29, IDOK);
     AddControl(window_, L"BUTTON", L"取消",
@@ -355,9 +376,7 @@ void OptionsWindow::AddNew()
         MessageBeep(MB_ICONWARNING);
         return;
     }
-    draft_.symbols.push_back(symbol);
-    RefreshList(static_cast<int>(draft_.symbols.size() - 1));
-    SetStatus(L"新交易对已添加；点击“确定”后保存并立即刷新。 ");
+    BeginValidation(symbol, PendingAction::Add);
 }
 
 void OptionsWindow::UpdateSelected()
@@ -392,6 +411,11 @@ void OptionsWindow::UpdateSelected()
     {
         SetStatus(L"该交易对已经在监控列表中。 ");
         MessageBeep(MB_ICONWARNING);
+        return;
+    }
+    if (symbol.code != draft_.symbols[static_cast<std::size_t>(selected)].code)
+    {
+        BeginValidation(symbol, PendingAction::Update, selected);
         return;
     }
     draft_.symbols[static_cast<std::size_t>(selected)] = symbol;
@@ -457,6 +481,11 @@ void OptionsWindow::Accept()
             MessageBeep(MB_ICONWARNING);
             return;
         }
+        if (symbol.code != draft_.symbols[static_cast<std::size_t>(selected)].code)
+        {
+            BeginValidation(symbol, PendingAction::Accept, selected);
+            return;
+        }
         draft_.symbols[static_cast<std::size_t>(selected)] = symbol;
     }
 
@@ -483,6 +512,105 @@ void OptionsWindow::Accept()
         SendMessageW(showChange_, BM_GETCHECK, 0, 0) == BST_CHECKED;
 
     accepted_ = true;
+    DestroyWindow(window_);
+}
+
+void OptionsWindow::SetValidating(bool validating)
+{
+    for (const int id : {kSymbolList, kSymbolEdit, kPrecisionEdit,
+                         kAddButton, kUpdateButton, kRemoveButton, IDOK})
+        EnableWindow(GetDlgItem(window_, id), !validating);
+}
+
+void OptionsWindow::BeginValidation(const SymbolConfig& symbol, PendingAction action,
+                                    int selection)
+{
+    if (validation_.valid()) return;
+    // 使用窗口定时器接收结果；后台任务不访问 HWND 或窗口对象。
+    if (!SetTimer(window_, kValidationTimer, 100, nullptr))
+    {
+        SetStatus(L"无法启动标的校验，未添加或保存，请重试。 ");
+        return;
+    }
+    pendingSymbol_ = symbol;
+    pendingAction_ = action;
+    pendingSelection_ = selection;
+    SetValidating(true);
+    SetStatus(L"正在查询该交易对的买卖报价，校验通过后才会添加或保存……");
+    try
+    {
+        validation_ = std::async(std::launch::async,
+            [transport = &transport_, code = symbol.code] {
+                BiquoteClient client(*transport);
+                std::string error;
+                if (client.ValidateSymbol(code, error)) return std::string{};
+                return error.empty() ? std::string("无法查询该交易对的价格") : error;
+            });
+    }
+    catch (const std::exception&)
+    {
+        KillTimer(window_, kValidationTimer);
+        SetValidating(false);
+        SetStatus(L"无法启动行情查询，未添加或保存，请重试。 ");
+    }
+}
+
+void OptionsWindow::CompleteValidation()
+{
+    if (!validation_.valid() ||
+        validation_.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    KillTimer(window_, kValidationTimer);
+    std::string error;
+    try
+    {
+        error = validation_.get();
+    }
+    catch (const std::exception&)
+    {
+        error = "行情查询异常，请稍后重试";
+    }
+    SetValidating(false);
+    if (closeRequested_)
+    {
+        DestroyWindow(window_);
+        return;
+    }
+    if (!error.empty())
+    {
+        SetStatus((L"校验失败，未添加或保存：" + Utf8ToWide(error)).c_str());
+        SetFocus(symbol_);
+        MessageBeep(MB_ICONWARNING);
+        return;
+    }
+    if (pendingAction_ == PendingAction::Add)
+    {
+        draft_.symbols.push_back(pendingSymbol_);
+        RefreshList(static_cast<int>(draft_.symbols.size() - 1));
+        SetStatus(L"报价校验通过，新交易对已添加；点击“确定”后保存。 ");
+    }
+    else
+    {
+        draft_.symbols[static_cast<std::size_t>(pendingSelection_)] = pendingSymbol_;
+        if (pendingAction_ == PendingAction::Accept)
+            Accept();
+        else
+        {
+            RefreshList(pendingSelection_);
+            SetStatus(L"报价校验通过，列表已更新；点击“确定”后保存。 ");
+        }
+    }
+}
+
+void OptionsWindow::Close()
+{
+    if (validation_.valid())
+    {
+        // 等待有超时限制的请求结束再销毁，防止窗口或 DLL 卸载后线程仍在运行。
+        closeRequested_ = true;
+        SetStatus(L"已取消操作，等待行情查询结束后关闭，不会保存更改……");
+        return;
+    }
     DestroyWindow(window_);
 }
 
