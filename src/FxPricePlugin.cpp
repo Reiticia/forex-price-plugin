@@ -5,6 +5,7 @@
 #include "OptionsWindow.h"
 #include "Quote.h"
 #include "BiquoteClient.h"
+#include "Tooltip.h"
 
 #include <Windows.h>
 
@@ -418,9 +419,7 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
     PriceItem& aggregate = items_[0];
     aggregate.value_.clear();
     aggregate.sample_.clear();
-    tooltip_ = L"biquote.io 外汇行情";
-    if (weekendPaused_)
-        tooltip_ += L"\n周末休市，已暂停抓取（UTC+3）；周一 00:00 自动恢复。";
+    std::vector<std::wstring> tooltipLines;
     for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
     {
         const PriceItem& item = items_[index + 1];
@@ -435,8 +434,13 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
                                             settings_.symbols[index].precision);
         if (sample.empty()) sample = L"--";
         aggregate.sample_ += display + L" " + sample;
-        tooltip_ += L"\n" + display + L"：" + item.detail_;
+        // Keep the selected bid/ask/mid/change fields, but don't repeat the
+        // provider's unbounded English description on every tooltip row.
+        std::wstring line = display + L"：" + item.value_;
+        if (item.value_ == L"--" && !item.detail_.empty())
+            line += L"（" + item.detail_.substr(0, 40) + (item.detail_.size() > 40 ? L"…" : L"") + L"）";
+        tooltipLines.push_back(std::move(line));
     }
-    tooltip_ += L"\n涨跌幅为相对前收的日涨跌，并非严格滚动 24 小时。";
+    tooltip_ = BuildCompactTooltip(tooltipLines, weekendPaused_);
 }
 } // namespace fxprice

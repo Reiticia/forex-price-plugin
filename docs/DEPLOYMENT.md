@@ -27,17 +27,17 @@ FxPricePlugin.dll
 x64：
 
 ```powershell
-cmake -S . -B build-x64 -A x64
-cmake --build build-x64 --config Release
-ctest --test-dir build-x64 -C Release --output-on-failure
+cmake --preset x64
+cmake --build --preset x64-release
+ctest --preset x64-release
 ```
 
 Win32：
 
 ```powershell
-cmake -S . -B build-win32 -A Win32
-cmake --build build-win32 --config Release
-ctest --test-dir build-win32 -C Release --output-on-failure
+cmake --preset win32
+cmake --build --preset win32-release
+ctest --preset win32-release
 ```
 
 GitHub Release 按架构提供发布包：
@@ -51,7 +51,7 @@ FxPricePlugin-win32.zip
 下载对应架构并解压后即可安装，无需重命名。发布前可记录 DLL 哈希：
 
 ```powershell
-Get-FileHash .\build-x64\Release\FxPricePlugin.dll -Algorithm SHA256
+Get-FileHash .\build\x64\Release\FxPricePlugin.dll -Algorithm SHA256
 ```
 
 GitHub Actions 在推送匹配 `vX.Y.Z` 的 Tag 时先校验 Tag、CMake 项目版本、插件元数据、
@@ -132,6 +132,7 @@ Precision1=-1
 
 | 现象 | 原因和处理 |
 | --- | --- |
+| 反复弹出“遇到不适当的参数” | TrafficMonitor 1.85.1 合并所有提示后超过 MFC 的 1024 字符上限；升级到精简提示的外汇及其他插件版本。外汇提示限制为 384 个 UTF-16 单元，但不能约束其他插件；仍超限时关闭主窗口和任务栏的鼠标提示 |
 | 插件管理中没有插件 | 检查 DLL 路径及 x64/Win32 架构 |
 | Windows 错误 193 | DLL 与 TrafficMonitor 架构不一致 |
 | 所有行情为 `--` | hover 查看错误，检查 biquote.io 连通性、防火墙和代理 |

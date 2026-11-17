@@ -51,7 +51,7 @@ eurusd
 
 ## 构建
 
-需要 Visual Studio 2022（含“使用 C++ 的桌面开发”工作负载）和 CMake 3.20 或更高版本。
+需要 Visual Studio 2022（含“使用 C++ 的桌面开发”工作负载）和 CMake 3.21 或更高版本。
 
 默认构建链路为 `CMake → Visual Studio 2022 / MSBuild → MSVC CL.exe`。CMake 负责生成
 Visual Studio 工程，实际 C++ 编译由 MSVC 完成；当前不使用 Clang。
@@ -59,25 +59,29 @@ Visual Studio 工程，实际 C++ 编译由 MSVC 完成；当前不使用 Clang�
 x64：
 
 ```powershell
-cmake -S . -B build-x64 -A x64
-cmake --build build-x64 --config Release
-ctest --test-dir build-x64 -C Release --output-on-failure
+cmake --preset x64
+cmake --build --preset x64-release
+ctest --preset x64-release
 ```
 
 Win32：
 
 ```powershell
-cmake -S . -B build-win32 -A Win32
-cmake --build build-win32 --config Release
-ctest --test-dir build-win32 -C Release --output-on-failure
+cmake --preset win32
+cmake --build --preset win32-release
+ctest --preset win32-release
 ```
 
 构建产物：
 
 ```text
-build-x64/Release/FxPricePlugin.dll
-build-win32/Release/FxPricePlugin.dll
+build/x64/Release/FxPricePlugin.dll
+build/win32/Release/FxPricePlugin.dll
 ```
+
+两个项目使用相同的 `CMakePresets.json` 约定，本地和 CI 的构建目录统一为
+`build/<架构>/`，Release 的 DLL、测试程序位于其 `Release/` 子目录；Debug 则位于
+`Debug/`。请从新目录获取产物；旧构建目录不再使用，确认无需保留后可自行删除。
 
 `FxPriceLiveSmoke.exe` 可执行一次真实 biquote 请求；它不加入默认 `ctest`，避免离线构建被网络状态影响。
 

@@ -3,6 +3,7 @@
 #include "MarketData.h"
 #include "MarketSchedule.h"
 #include "Quote.h"
+#include "Tooltip.h"
 
 #include <Windows.h>
 
@@ -365,6 +366,35 @@ int main()
           "配置不包含账户或令牌字段");
     configFile.close();
     std::filesystem::remove_all(testRoot);
+
+    const auto shortTooltip = fxprice::BuildCompactTooltip({L"EURUSD.s：≈1.10000 Δ+0.50%"}, false);
+    Check(shortTooltip.find(L"EURUSD.s：≈1.10000 Δ+0.50%") != std::wstring::npos &&
+              shortTooltip.find(L"非24h") != std::wstring::npos &&
+              shortTooltip.find(L"更多见插件设置") == std::wstring::npos,
+          "短提示保留价格与日涨跌，且明确非 24 小时涨跌");
+    const std::size_t contentLimit = fxprice::kMaxTooltipLength - std::wstring(L"\n…（更多见插件设置）").size();
+    const auto title = fxprice::BuildCompactTooltip({}, false);
+    Check(fxprice::BuildCompactTooltip({std::wstring(contentLimit - title.size() - 1, L'X')}, false).size() ==
+              contentLimit, "提示长度边界允许完整一行");
+    for (bool weekend : {false, true})
+    {
+        for (const auto& lines : {
+                 std::vector<std::wstring>(fxprice::kMaxSymbols, std::wstring(140, L'X')),
+                 std::vector<std::wstring>{std::wstring(5000, L'E')},
+                 std::vector<std::wstring>{}})
+        {
+            const auto tooltip = fxprice::BuildCompactTooltip(lines, weekend);
+            Check(tooltip.size() <= fxprice::kMaxTooltipLength,
+                  "8 个标的、超长错误、空列表及周末状态均有长度上限");
+            Check(tooltip.size() + 384 + 256 <= 1024,
+                  "为 CryptoPrice 的 384 字符及宿主 256 字符预留空间");
+            Check((tooltip.find(L"周末休市") != std::wstring::npos) == weekend,
+                  "截断时保留并正确显示周末暂停状态");
+            if (!lines.empty())
+                Check(tooltip.find(L"更多见插件设置") != std::wstring::npos,
+                      "超限时在完整行边界截断并显示提示");
+        }
+    }
 
     if (failures == 0) std::cout << "All tests passed\n";
     return failures == 0 ? 0 : 1;

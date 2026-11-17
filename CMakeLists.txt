@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 
 project(FxPricePlugin VERSION 0.4.0 LANGUAGES CXX)
 
@@ -13,6 +13,7 @@ add_library(FxPricePlugin SHARED
     src/Quote.cpp
     src/BiquoteClient.cpp
     src/OptionsWindow.cpp
+    src/Tooltip.cpp
     src/dllmain.cpp
 )
 
@@ -38,6 +39,7 @@ if(BUILD_TESTING)
     add_executable(FxPriceTests
         tests/Tests.cpp
         src/Config.cpp
+        src/Tooltip.cpp
         src/MarketData.cpp
         src/Quote.cpp
         src/BiquoteClient.cpp

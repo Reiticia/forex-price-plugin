@@ -13,7 +13,8 @@
 - 显示开关与每交易对独立小数位；
 - 配置保存与读取（含脏值回退）；
 - DLL 导出入口、API v8 与多交易对显示项；
-- 隐藏某个价格字段后示例文本随之变化。
+- 隐藏某个价格字段后示例文本随之变化；
+- 悬停提示在 8 标的、超长错误、空列表和周末暂停状态下均不超过 384 个 UTF-16 单元，为其他插件及宿主预留空间。
 
 ## 2. 自动化测试
 
@@ -33,17 +34,17 @@
 x64：
 
 ```powershell
-cmake -S . -B build-x64 -A x64
-cmake --build build-x64 --config Release
-ctest --test-dir build-x64 -C Release --output-on-failure
+cmake --preset x64
+cmake --build --preset x64-release
+ctest --preset x64-release
 ```
 
 Win32：
 
 ```powershell
-cmake -S . -B build-win32 -A Win32
-cmake --build build-win32 --config Release
-ctest --test-dir build-win32 -C Release --output-on-failure
+cmake --preset win32
+cmake --build --preset win32-release
+ctest --preset win32-release
 ```
 
 三个离线测试（`FxPriceTests`、`FxPriceOptionsTests`、`FxPricePluginSmoke`）都应显示 `Passed`。配置窗口测试自动打开并关闭窗口，不访问网络。
@@ -67,8 +68,8 @@ ctest --test-dir build-win32 -C Release --output-on-failure
 ## 5. DLL 烟雾测试
 
 ```powershell
-.\build-x64\Release\FxPricePluginSmoke.exe `
-  .\build-x64\Release\FxPricePlugin.dll
+.\build\x64\Release\FxPricePluginSmoke.exe `
+  .\build\x64\Release\FxPricePlugin.dll
 ```
 
 验证内容：
@@ -81,7 +82,7 @@ ctest --test-dir build-win32 -C Release --output-on-failure
 ## 6. 真实行情测试
 
 ```powershell
-.\build-x64\Release\FxPriceLiveSmoke.exe
+.\build\x64\Release\FxPriceLiveSmoke.exe
 ```
 
 - 对 `EURUSD`、`USDJPY` 发起真实 biquote 请求；
@@ -90,26 +91,26 @@ ctest --test-dir build-win32 -C Release --output-on-failure
 - 进程退出码为 0。
 
 ```powershell
-.\build-x64\Release\FxPricePluginLiveSmoke.exe `
-  .\build-x64\Release\FxPricePlugin.dll
+.\build\x64\Release\FxPricePluginLiveSmoke.exe `
+  .\build\x64\Release\FxPricePlugin.dll
 ```
 
 - 加载 DLL，调用 `DataRequired` 触发后台刷新；
 - 校验独立项 value 含 `◀`、`▶`、`≈`、`Δ`；
-- 工具提示包含 `日涨跌`。
+- 工具提示包含 `日涨跌` 与所选价格字段，且总长不超过 384 个 UTF-16 单元。
 
 真实测试最多等待约 20 秒，覆盖 biquote 网络请求往返。
 
 ## 7. DLL 导出和架构
 
 ```powershell
-dumpbin /exports .\build-x64\Release\FxPricePlugin.dll
+dumpbin /exports .\build\x64\Release\FxPricePlugin.dll
 ```
 
 或：
 
 ```powershell
-llvm-readobj --coff-exports .\build-x64\Release\FxPricePlugin.dll
+llvm-readobj --coff-exports .\build\x64\Release\FxPricePlugin.dll
 ```
 
 必须包含：
@@ -128,6 +129,7 @@ TMPluginGetInstance
 4. 依次切换买一价、卖一价、中间价和日涨跌幅开关，确认任务栏独立项、汇总项及工具提示同步变化，涨跌幅未被截断。
 5. 确认每个交易对按自身小数位设置显示，留空时跟随行情精度。
 6. 重启 TrafficMonitor，确认交易对、显示开关和精度配置被保留。
+   提示以 `◀`、`▶`、`≈`、`Δ` 紧凑显示所选字段，顶部说明符号含义及日涨跌口径，不重复英文全名；总长超过预算时按完整行截断并显示“更多见插件设置”。
 7. 在隔离的测试环境中验证固定 UTC+3 周末边界：UTC 周五 20:59:59 仍可刷新，21:00:00 开始暂停；UTC 周日 20:59:59 仍暂停，21:00:00 恢复。暂停期间定时刷新、手动刷新、保存未变更标的的配置均不发起新的 biquote 刷新请求；添加或替换标的仍会主动查询一次报价用于有效性校验，校验结果不写入任务栏报价缓存；进入周末时原有报价保留，工具提示显示“周末休市，已暂停抓取（UTC+3）”。周末启动或修改配置后，没有缓存的项目显示 `--`。
    恢复时确认下次 `DataRequired` 自动抓取并移除暂停提示；保持 UTC 时刻不变并切换电脑时区，暂停判断应保持一致。周末前已发出的请求允许正常完成；测试结束后恢复系统时间和时区。
 8. 断网后确认显示 `--`，工具提示包含 biquote 网络错误。
@@ -151,6 +153,7 @@ TMPluginGetInstance
 | --- | --- |
 | CMake 找不到编译器 | 安装 Visual Studio C++ 桌面开发工作负载 |
 | `LoadLibrary failed: 193` | DLL 与测试程序或 TrafficMonitor 架构不一致 |
+| 反复弹出“遇到不适当的参数” | TrafficMonitor 1.85.1 的 MFC 合并提示有 1024 字符上限；升级外汇和其他插件至精简提示版本，仍超限时关闭主窗口和任务栏鼠标提示 |
 | 所有行情为 `--` | 检查 `biquote.io:443`、代理、防火墙和 TLS |
 | 个别交易对显示 `--` | 检查交易对是否为六位大写货币代码，服务端可能静默跳过无效标的 |
 | 小数位数与设置不一致 | 确认先选中对应交易对，再点击“更新选中项”或“确定” |

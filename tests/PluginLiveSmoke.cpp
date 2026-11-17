@@ -1,4 +1,5 @@
 #include "PluginInterface.h"
+#include "Tooltip.h"
 
 #include <Windows.h>
 
@@ -42,7 +43,8 @@ int wmain(int argumentCount, wchar_t* arguments[])
     }
     Sleep(100);
     const std::wstring tooltip = plugin->GetTooltipInfo();
-    const bool valid = complete && tooltip.find(L"日涨跌") != std::wstring::npos;
+    const bool valid = complete && tooltip.find(L"日涨跌") != std::wstring::npos &&
+        tooltip.find(value) != std::wstring::npos && tooltip.size() <= fxprice::kMaxTooltipLength;
     std::wcout << L"value=" << value << L'\n' << tooltip << L'\n';
     FreeLibrary(module);
     return valid ? 0 : 4;

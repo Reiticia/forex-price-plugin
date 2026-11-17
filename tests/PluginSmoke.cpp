@@ -1,4 +1,5 @@
 #include "PluginInterface.h"
+#include "Tooltip.h"
 
 #include <Windows.h>
 
@@ -27,7 +28,9 @@ int wmain(int argumentCount, wchar_t* arguments[])
                  *plugin->GetInfo(ITMPlugin::TMI_NAME) &&
                  plugin->GetItem(0) && plugin->GetItem(1) &&
                  std::wcscmp(plugin->GetItem(1)->GetItemLableText(), L"EURUSD.s: ") == 0 &&
-                 plugin->GetItem(1)->IsCustomDraw();
+                 plugin->GetItem(1)->IsCustomDraw() &&
+                 plugin->GetTooltipInfo() &&
+                 std::wcslen(plugin->GetTooltipInfo()) <= fxprice::kMaxTooltipLength;
     if (!FreeLibrary(module)) valid = false;
     if (!valid)
     {

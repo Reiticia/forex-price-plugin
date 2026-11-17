@@ -18,7 +18,7 @@ FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版�
 - Windows 10 或更高版本；
 - Visual Studio 2022 C++ 桌面开发工作负载；
 - Windows 10/11 SDK；
-- CMake 3.20 或更高版本；
+- CMake 3.21 或更高版本；
 - C++17。
 
 运行时只依赖 WinHTTP 和 User32，不使用 MFC 或第三方 JSON 库（响应解析为项目内自研 JSON 解析器）。
@@ -172,17 +172,17 @@ Visual Studio 生成器创建工程，再由 MSBuild 调用 MSVC 编译器；当
 x64：
 
 ```powershell
-cmake -S . -B build-x64 -A x64
-cmake --build build-x64 --config Release
-ctest --test-dir build-x64 -C Release --output-on-failure
+cmake --preset x64
+cmake --build --preset x64-release
+ctest --preset x64-release
 ```
 
 Win32：
 
 ```powershell
-cmake -S . -B build-win32 -A Win32
-cmake --build build-win32 --config Release
-ctest --test-dir build-win32 -C Release --output-on-failure
+cmake --preset win32
+cmake --build --preset win32-release
+ctest --preset win32-release
 ```
 
 产物为 `FxPricePlugin.dll`。插件 DLL 与 TrafficMonitor 必须使用相同架构。
