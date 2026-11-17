@@ -87,9 +87,11 @@ build-win32/Release/FxPricePlugin.dll
 
 - 推送 `vX.Y.Z` Tag 时，工作流会验证 Tag、CMake 项目版本、插件元数据、HTTP
   User-Agent 与 `CHANGELOG.md` 版本一致，构建并测试 x64、Win32，从变更日志提取对应
-  版本章节作为 Release 说明，随后创建 GitHub Release，附带两个 DLL 和 SHA-256 校验文件；
+  版本章节作为 Release 说明，随后创建 GitHub Release，附带 `FxPricePlugin-x64.zip`、
+  `FxPricePlugin-win32.zip` 和 ZIP 的 SHA-256 校验文件；每个 ZIP 内均为 `FxPricePlugin.dll`；
 - 在 Actions 页面手动运行时，只构建并测试 x64、Win32，不创建 Release。两个 DLL 作为
-  Workflow Artifacts 保留 14 天，可从该次运行页面下载。
+  `FxPricePlugin-x64`、`FxPricePlugin-win32` Workflow Artifacts 保留 14 天，可从该次运行页面下载，
+  内部 DLL 名称统一为 `FxPricePlugin.dll`，不附加版本号、提交号或架构后缀。
 
 ## 安装和使用
 

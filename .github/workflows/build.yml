@@ -14,7 +14,7 @@ jobs:
     name: Resolve build metadata
     runs-on: ubuntu-latest
     outputs:
-      artifact_version: ${{ steps.version.outputs.artifact_version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,15 +74,10 @@ jobs:
             if ($tagVersion -ne $cmakeVersion) {
               throw "Tag version $tagVersion does not match CMake version $cmakeVersion."
             }
-            $artifactVersion = $tagVersion
-          }
-          else {
-            $shortSha = $env:GITHUB_SHA.Substring(0, 7)
-            $artifactVersion = "$cmakeVersion-$shortSha"
           }
 
-          "artifact_version=$artifactVersion" >> $env:GITHUB_OUTPUT
-          Write-Host "Artifact version: $artifactVersion"
+          "version=$cmakeVersion" >> $env:GITHUB_OUTPUT
+          Write-Host "Plugin version: $cmakeVersion"
 
   build:
     name: Build ${{ matrix.label }}
@@ -119,14 +114,13 @@ jobs:
           }
 
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          $fileName = 'FxPricePlugin-${{ needs.metadata.outputs.artifact_version }}-${{ matrix.label }}.dll'
-          Copy-Item -LiteralPath $source -Destination (Join-Path $PWD "dist/$fileName")
+          Copy-Item -LiteralPath $source -Destination (Join-Path $PWD 'dist/FxPricePlugin.dll')
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: FxPricePlugin-${{ matrix.label }}
-          path: dist/*.dll
+          path: dist/FxPricePlugin.dll
           if-no-files-found: error
           retention-days: 14
 
@@ -148,18 +142,32 @@ jobs:
         with:
           pattern: FxPricePlugin-*
           path: release-assets
-          merge-multiple: true
+          merge-multiple: false
+
+      - name: Package DLLs by architecture
+        shell: pwsh
+        run: |
+          foreach ($architecture in @('x64', 'win32')) {
+            $artifactName = "FxPricePlugin-$architecture"
+            $source = Join-Path $PWD "release-assets/$artifactName/FxPricePlugin.dll"
+            if (-not (Test-Path -LiteralPath $source)) {
+              throw "Downloaded DLL not found: $source"
+            }
+
+            Compress-Archive -LiteralPath $source `
+              -DestinationPath (Join-Path $PWD "release-assets/$artifactName.zip")
+          }
 
       - name: Create SHA-256 checksums
         shell: bash
         run: |
           cd release-assets
-          sha256sum ./*.dll > SHA256SUMS.txt
+          sha256sum ./*.zip > SHA256SUMS.txt
 
       - name: Extract release notes from CHANGELOG.md
         shell: pwsh
         run: |
-          $version = '${{ needs.metadata.outputs.artifact_version }}'
+          $version = '${{ needs.metadata.outputs.version }}'
           $lines = @(Get-Content -LiteralPath CHANGELOG.md)
           $escapedVersion = [regex]::Escape($version)
           $versionHeading = "^##\s+\[?v?$escapedVersion\]?(?:\s+-.*)?\s*$"
@@ -198,7 +206,7 @@ jobs:
           }
 
           $notes | Set-Content -LiteralPath release-notes.md -Encoding utf8
-          Write-Host "Release notes for $version:"
+          Write-Host "Release notes for ${version}:"
           $notes | ForEach-Object { Write-Host "  $_" }
 
       - name: Publish release
@@ -207,5 +215,5 @@ jobs:
           name: FxPricePlugin ${{ github.ref_name }}
           body_path: release-notes.md
           files: |
-            release-assets/*.dll
+            release-assets/*.zip
             release-assets/SHA256SUMS.txt

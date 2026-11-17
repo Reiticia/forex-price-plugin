@@ -40,14 +40,15 @@ cmake --build build-win32 --config Release
 ctest --test-dir build-win32 -C Release --output-on-failure
 ```
 
-建议发布包命名：
+GitHub Release 按架构提供发布包：
 
 ```text
-FxPricePlugin-0.4.0-x64.dll
-FxPricePlugin-0.4.0-win32.dll
+FxPricePlugin-x64.zip
+FxPricePlugin-win32.zip
 ```
 
-安装时文件名使用 `FxPricePlugin.dll`。发布前记录哈希：
+每个 ZIP 内的文件名均为 `FxPricePlugin.dll`，不携带版本号、提交号或架构后缀。
+下载对应架构并解压后即可安装，无需重命名。发布前可记录 DLL 哈希：
 
 ```powershell
 Get-FileHash .\build-x64\Release\FxPricePlugin.dll -Algorithm SHA256
@@ -55,8 +56,9 @@ Get-FileHash .\build-x64\Release\FxPricePlugin.dll -Algorithm SHA256
 
 GitHub Actions 在推送匹配 `vX.Y.Z` 的 Tag 时先校验 Tag、CMake 项目版本、插件元数据、
 WinHTTP User-Agent 与 `CHANGELOG.md` 版本一致，再自动构建 x64、Win32，运行离线测试，
-生成 SHA-256 校验文件并创建 Release；手动运行工作流时只保留两个架构的 Workflow
-Artifacts，不创建 Release。
+按架构打包 ZIP，生成 ZIP 的 SHA-256 校验文件并创建 Release；手动运行工作流时只保留
+`FxPricePlugin-x64`、`FxPricePlugin-win32` 两个 Workflow Artifacts，内部均为
+`FxPricePlugin.dll`，不创建 Release。
 
 ## 4. 首次安装
 
