@@ -16,8 +16,18 @@ constexpr int kSymbolList = 1001;
 constexpr int kSymbolEdit = 1002;
 constexpr int kAddButton = 1003;
 constexpr int kUpdateButton = 1004;
+constexpr int kRemoveButton = 1005;
+constexpr int kRefreshEdit = 1006;
+constexpr int kSourceCombo = 1007;
 constexpr int kStatusText = 1008;
+constexpr int kShowBid = 1009;
+constexpr int kShowAsk = 1010;
+constexpr int kShowMid = 1011;
+constexpr int kShowChange = 1012;
 constexpr int kPrecisionEdit = 1013;
+constexpr int kSymbolGroup = 1014;
+constexpr int kGlobalGroup = 1015;
+constexpr int kPrecisionHint = 1016;
 int failures{};
 
 void Check(bool condition, const char* message)
@@ -27,6 +37,63 @@ void Check(bool condition, const char* message)
         std::cerr << "FAILED: " << message << '\n';
         ++failures;
     }
+}
+
+void CheckLayout(HWND window)
+{
+    RECT symbolGroup{}, globalGroup{};
+    Check(GetWindowRect(GetDlgItem(window, kSymbolGroup), &symbolGroup) != FALSE,
+          "存在独立配置分组");
+    Check(GetWindowRect(GetDlgItem(window, kGlobalGroup), &globalGroup) != FALSE,
+          "存在全局配置分组");
+    Check(symbolGroup.bottom < globalGroup.top, "独立与全局配置分组互不重叠");
+    RECT client{};
+    GetClientRect(window, &client);
+    Check(client.right == 660 && client.bottom == 480,
+          "窗口尺寸与 Crypto 设置页一致，保持紧凑布局");
+    RECT symbol{}, precision{}, add{}, update{}, remove{};
+    GetWindowRect(GetDlgItem(window, kSymbolEdit), &symbol);
+    GetWindowRect(GetDlgItem(window, kPrecisionEdit), &precision);
+    GetWindowRect(GetDlgItem(window, kAddButton), &add);
+    GetWindowRect(GetDlgItem(window, kUpdateButton), &update);
+    GetWindowRect(GetDlgItem(window, kRemoveButton), &remove);
+    Check(add.left > symbol.right && add.left > precision.right &&
+              add.left == update.left && update.left == remove.left &&
+              add.bottom < update.top && update.bottom < remove.top,
+          "参照 Crypto 设置页，标的操作按钮在编辑区右侧竖排");
+    for (const int id : {kSymbolList, kSymbolEdit, kPrecisionEdit, kPrecisionHint,
+                         kAddButton, kUpdateButton, kRemoveButton})
+    {
+        RECT control{};
+        GetWindowRect(GetDlgItem(window, id), &control);
+        Check(control.left > symbolGroup.left && control.right < symbolGroup.right &&
+                  control.top > symbolGroup.top && control.bottom < symbolGroup.bottom,
+              "独立配置控件均在独立分组内");
+    }
+    for (const int id : {kRefreshEdit, kSourceCombo, kShowBid, kShowAsk, kShowMid, kShowChange})
+    {
+        RECT control{};
+        GetWindowRect(GetDlgItem(window, id), &control);
+        Check(control.left > globalGroup.left && control.right < globalGroup.right &&
+                  control.top > globalGroup.top && control.bottom < globalGroup.bottom,
+              "全局配置控件均在全局分组内");
+    }
+
+    const HWND hint = GetDlgItem(window, kPrecisionHint);
+    wchar_t text[64]{};
+    const int length = GetWindowTextW(hint, text, 64);
+    Check(std::wstring(text) == L"留空自动", "小数位提示简洁");
+    const HDC dc = GetDC(hint);
+    const auto font = reinterpret_cast<HFONT>(SendMessageW(hint, WM_GETFONT, 0, 0));
+    const HGDIOBJ previous = SelectObject(dc, font);
+    SIZE extent{};
+    GetTextExtentPoint32W(dc, text, length, &extent);
+    SelectObject(dc, previous);
+    ReleaseDC(hint, dc);
+    RECT hintRect{};
+    GetClientRect(hint, &hintRect);
+    Check(extent.cx <= hintRect.right && extent.cy <= hintRect.bottom,
+          "小数位提示可完整显示");
 }
 
 class FakeTransport final : public fxprice::IHttpTransport
@@ -80,6 +147,9 @@ void CALLBACK DriveWindow(HWND, UINT, UINT_PTR, DWORD)
     if (scenario.stage == 0)
     {
         scenario.stage = 1;
+        CheckLayout(window);
+        SetWindowTextW(GetDlgItem(window, kRefreshEdit), L"31");
+        SendDlgItemMessageW(window, kShowBid, BM_SETCHECK, BST_UNCHECKED, 0);
         SetWindowTextW(GetDlgItem(window, kSymbolEdit), scenario.symbol);
         SetWindowTextW(GetDlgItem(window, kPrecisionEdit), L"3");
         SendMessageW(window, WM_COMMAND, scenario.command, 0);
@@ -99,6 +169,9 @@ void CALLBACK DriveWindow(HWND, UINT, UINT_PTR, DWORD)
     }
     if (!IsWindowEnabled(GetDlgItem(window, IDOK))) return;
 
+    Check(GetDlgItemInt(window, kRefreshEdit, nullptr, FALSE) == 31 &&
+              SendDlgItemMessageW(window, kShowBid, BM_GETCHECK, 0, 0) == BST_UNCHECKED,
+          "标的操作不重置全局配置");
     const int expectedCount = scenario.valid && scenario.command == kAddButton ? 2 : 1;
     Check(SendDlgItemMessageW(window, kSymbolList, LB_GETCOUNT, 0, 0) == expectedCount,
           "仅校验成功才能添加或更新列表");
@@ -124,6 +197,8 @@ void Run(Scenario scenario, const std::string& response, bool transportSucceeds 
     transport.succeeds = transportSucceeds;
     fxprice::Settings settings;
     settings.symbols = {fxprice::SymbolConfig{L"EURUSD", -1}};
+    settings.refreshSeconds = 15;
+    settings.display.showBid = true;
     active = &scenario;
     const UINT_PTR timer = SetTimer(nullptr, 0, 10, DriveWindow);
     Check(timer != 0, "创建测试定时器");
@@ -137,7 +212,11 @@ void Run(Scenario scenario, const std::string& response, bool transportSucceeds 
     if (accepted)
     {
         const bool adding = scenario.command == kAddButton;
+        Check(settings.refreshSeconds == 31 && !settings.display.showBid,
+              "全局配置随确定保存");
         Check(settings.symbols.size() == (adding ? 2u : 1u), "保存后的标的数量正确");
+        if (adding)
+            Check(settings.symbols[0].precision == -1, "新标的小数位不影响已有标的");
         const auto& symbol = settings.symbols[adding ? 1 : 0];
         Check(symbol.code == fxprice::NormalizeSymbol(scenario.symbol) &&
                   symbol.precision == 3,
@@ -145,6 +224,8 @@ void Run(Scenario scenario, const std::string& response, bool transportSucceeds 
     }
     else
     {
+        Check(settings.refreshSeconds == 15 && settings.display.showBid,
+              "失败或取消不改变全局配置");
         Check(settings.symbols.size() == 1 && settings.symbols[0].code == L"EURUSD" &&
                   settings.symbols[0].precision == -1,
               "失败或取消不能改变调用方配置");

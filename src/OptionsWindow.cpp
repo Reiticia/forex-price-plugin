@@ -29,6 +29,9 @@ constexpr int kShowAsk = 1010;
 constexpr int kShowMid = 1011;
 constexpr int kShowChange = 1012;
 constexpr int kPrecisionEdit = 1013;
+constexpr int kSymbolGroup = 1014;
+constexpr int kGlobalGroup = 1015;
+constexpr int kPrecisionHint = 1016;
 constexpr UINT_PTR kValidationTimer = 1;
 
 std::wstring Utf8ToWide(const std::string& text)
@@ -206,85 +209,84 @@ LRESULT OptionsWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
 void OptionsWindow::CreateControls()
 {
-    AddControl(window_, L"STATIC", L"已监控标的（最多 8 个）",
-               0, 18, 14, 260, 20, -1);
+    AddControl(window_, L"BUTTON", L"标的独立设置（最多 8 个）",
+               BS_GROUPBOX, 18, 12, 624, 280, kSymbolGroup);
     list_ = AddControl(window_, L"LISTBOX", L"",
                        WS_BORDER | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY,
-                       18, 36, 624, 186, kSymbolList);
+                       30, 36, 600, 134, kSymbolList);
 
-    // 左列中文标签宽度统一为 72，避免"交易对/刷新间隔"被输入框遮挡。
+    // 标签与输入框保持间隔；独立设置和操作均放在交易对分组内。
     constexpr int kLabelWidth = 72;
-    constexpr int kLabelY = 234;
-    constexpr int kControlY = 232;
-
-    AddControl(window_, L"STATIC", L"交易对", 0, 18, kLabelY, kLabelWidth, 20, -1);
+    AddControl(window_, L"STATIC", L"交易对", 0, 30, 194, kLabelWidth, 20, -1);
     symbol_ = AddControl(window_, L"EDIT", L"",
                          WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
-                         94, kControlY, 148, 25, kSymbolEdit);
+                         110, 190, 160, 25, kSymbolEdit);
     SendMessageW(symbol_, EM_SETLIMITTEXT, 16, 0);
 
-    AddControl(window_, L"STATIC", L"数据源", 0, 258, kLabelY, 56, 20, -1);
+    // 小数位数仅作用于当前交易对，留空自动推断，填 0–10 固定显示位数。
+    AddControl(window_, L"STATIC", L"小数位数", 0, 30, 238, kLabelWidth, 20, -1);
+    precision_ = AddControl(window_, L"EDIT", L"",
+                            WS_BORDER | WS_TABSTOP | ES_NUMBER,
+                            110, 234, 48, 25, kPrecisionEdit);
+    SendMessageW(precision_, EM_SETLIMITTEXT, 4, 0);
+    AddControl(window_, L"STATIC", L"留空自动", 0, 170, 238, 240, 20, kPrecisionHint);
+
+    AddControl(window_, L"BUTTON", L"添加新标的",
+               WS_TABSTOP | BS_PUSHBUTTON, 530, 189, 100, 27, kAddButton);
+    AddControl(window_, L"BUTTON", L"更新选中项",
+               WS_TABSTOP | BS_PUSHBUTTON, 530, 221, 100, 27, kUpdateButton);
+    AddControl(window_, L"BUTTON", L"删除选中项",
+               WS_TABSTOP | BS_PUSHBUTTON, 530, 253, 100, 27, kRemoveButton);
+
+    AddControl(window_, L"BUTTON", L"全局设置（应用于所有标的）",
+               BS_GROUPBOX, 18, 302, 624, 100, kGlobalGroup);
+    AddControl(window_, L"STATIC", L"数据源", 0, 30, 328, kLabelWidth, 20, -1);
     const HWND source = AddControl(window_, L"COMBOBOX", L"",
                                    WS_TABSTOP | CBS_DROPDOWNLIST,
-                                   318, kControlY, 180, 120, kSourceCombo);
+                                   110, 324, 150, 120, kSourceCombo);
     SendMessageW(source, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(L"biquote.io"));
     SendMessageW(source, CB_SETCURSEL, 0, 0);
     EnableWindow(source, FALSE);
 
-    // "小数位数"作用于当前选中交易对：留空自动推断，填 0–10 固定显示位数。
-    AddControl(window_, L"STATIC", L"小数位数", 0, 18, 268, kLabelWidth, 20, -1);
-    precision_ = AddControl(window_, L"EDIT", L"",
-                            WS_BORDER | WS_TABSTOP | ES_NUMBER,
-                            94, 264, 44, 25, kPrecisionEdit);
-    SendMessageW(precision_, EM_SETLIMITTEXT, 4, 0);
-    AddControl(window_, L"STATIC", L"留空自动；0–10", 0, 148, 268, 100, 20, -1);
-
-    AddControl(window_, L"STATIC", L"刷新间隔", 0, 258, 268, 72, 20, -1);
+    AddControl(window_, L"STATIC", L"刷新间隔", 0, 310, 328, kLabelWidth, 20, -1);
     refresh_ = AddControl(window_, L"EDIT",
                           std::to_wstring(draft_.refreshSeconds).c_str(),
                           WS_BORDER | WS_TABSTOP | ES_NUMBER,
-                          334, 264, 70, 25, kRefreshEdit);
-    AddControl(window_, L"STATIC", L"秒（2–300）", 0, 410, 268, 100, 20, -1);
+                          390, 324, 60, 25, kRefreshEdit);
+    AddControl(window_, L"STATIC", L"秒（2–300）", 0, 462, 328, 156, 20, -1);
 
     // 勾选字段同时用于任务栏和工具提示。
-    AddControl(window_, L"STATIC", L"任务栏内容", 0, 18, 302, kLabelWidth, 20, -1);
+    AddControl(window_, L"STATIC", L"任务栏内容", 0, 30, 358, kLabelWidth, 20, -1);
     showBid_ = AddControl(window_, L"BUTTON", L"买一价",
                           WS_TABSTOP | BS_AUTOCHECKBOX,
-                          94, 298, 78, 22, kShowBid);
+                          110, 354, 78, 22, kShowBid);
     showAsk_ = AddControl(window_, L"BUTTON", L"卖一价",
                           WS_TABSTOP | BS_AUTOCHECKBOX,
-                          178, 298, 78, 22, kShowAsk);
+                          198, 354, 78, 22, kShowAsk);
     showMid_ = AddControl(window_, L"BUTTON", L"中间价",
                           WS_TABSTOP | BS_AUTOCHECKBOX,
-                          262, 298, 78, 22, kShowMid);
+                          286, 354, 78, 22, kShowMid);
     showChange_ = AddControl(window_, L"BUTTON", L"日涨跌幅",
                              WS_TABSTOP | BS_AUTOCHECKBOX,
-                             346, 298, 104, 22, kShowChange);
+                             374, 354, 104, 22, kShowChange);
     SendMessageW(showBid_, BM_SETCHECK, draft_.display.showBid ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(showAsk_, BM_SETCHECK, draft_.display.showAsk ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(showMid_, BM_SETCHECK, draft_.display.showMid ? BST_CHECKED : BST_UNCHECKED, 0);
     SendMessageW(showChange_, BM_SETCHECK, draft_.display.showChange ? BST_CHECKED : BST_UNCHECKED, 0);
 
-    AddControl(window_, L"STATIC", L"涨跌口径", 0, 18, 332, kLabelWidth, 20, -1);
+    AddControl(window_, L"STATIC", L"涨跌口径", 0, 30, 378, kLabelWidth, 20, -1);
     AddControl(window_, L"STATIC", L"相对前收，非严格滚动 24 小时",
-               0, 94, 332, 400, 20, -1);
-
-    AddControl(window_, L"BUTTON", L"添加新标的",
-               WS_TABSTOP | BS_PUSHBUTTON, 530, 232, 112, 27, kAddButton);
-    AddControl(window_, L"BUTTON", L"更新选中项",
-               WS_TABSTOP | BS_PUSHBUTTON, 530, 266, 112, 27, kUpdateButton);
-    AddControl(window_, L"BUTTON", L"删除选中项",
-               WS_TABSTOP | BS_PUSHBUTTON, 530, 300, 112, 27, kRemoveButton);
+               0, 110, 378, 400, 20, -1);
 
     status_ = AddControl(
         window_, L"STATIC",
         L"输入如 EURUSD.s、EUR/USD；会自动规范化。",
-        0, 18, 392, 610, 36, kStatusText);
+        0, 18, 412, 624, 24, kStatusText);
     AddControl(window_, L"BUTTON", L"确定",
-               WS_TABSTOP | BS_DEFPUSHBUTTON, 454, 434, 88, 29, IDOK);
+               WS_TABSTOP | BS_DEFPUSHBUTTON, 454, 442, 88, 29, IDOK);
     AddControl(window_, L"BUTTON", L"取消",
-               WS_TABSTOP | BS_PUSHBUTTON, 554, 434, 88, 29, IDCANCEL);
+               WS_TABSTOP | BS_PUSHBUTTON, 554, 442, 88, 29, IDCANCEL);
 
     RefreshList(draft_.symbols.empty() ? -1 : 0);
     SetFocus(list_);
