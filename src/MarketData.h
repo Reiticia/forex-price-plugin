@@ -14,4 +14,8 @@ std::string BuildLatestQuery(const std::vector<std::wstring>& symbols);
 bool ParseLatestResponse(const std::string& json,
                          std::unordered_map<std::string, Quote>& quotes,
                          std::string& error);
+// Bitget CFD: 仅接受所选模式的精确代码；日涨跌取 bidOpenPriceChange × 100。
+bool ParseBitgetCfdResponse(const std::string& json, QuoteSource source,
+                            std::unordered_map<std::string, Quote>& quotes,
+                            std::string& error);
 } // namespace fxprice

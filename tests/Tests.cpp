@@ -30,7 +30,8 @@ public:
         ++requests;
         lastHost = host;
         lastPath = path;
-        response = responseBody;
+        const auto found = responses.find(path);
+        response = found == responses.end() ? responseBody : found->second;
         error = succeeds ? std::string{} : "模拟 HTTP 或网络错误";
         return succeeds;
     }
@@ -38,6 +39,7 @@ public:
     std::wstring lastHost;
     std::wstring lastPath;
     std::string responseBody;
+    std::unordered_map<std::wstring, std::string> responses;
     bool succeeds{true};
     int requests{};
 };
@@ -313,6 +315,7 @@ int main()
     fxprice::ConfigStore config;
     config.SetDirectory(configDirectory.wstring());
     fxprice::Settings settings;
+    settings.source = fxprice::QuoteSource::BitgetPro;
     settings.refreshSeconds = 17;
     settings.symbols = {fxprice::SymbolConfig{L"EURUSD", 4},
                         fxprice::SymbolConfig{L"USDJPY", -1}};
@@ -321,6 +324,9 @@ int main()
     Check(config.Save(settings), "保存无凭据插件配置");
     const fxprice::Settings loaded = config.Load();
     Check(loaded.refreshSeconds == 17, "读取刷新间隔");
+    Check(loaded.source == fxprice::QuoteSource::BitgetPro, "保存及恢复数据源模式");
+    WritePrivateProfileStringW(L"General", L"Source", L"unknown", config.Path().c_str());
+    Check(config.Load().source == fxprice::QuoteSource::Biquote, "未知数据源兼容回退 biquote");
     Check(loaded.symbols.size() == 2 &&
               loaded.symbols[0].code == L"EURUSD" &&
               loaded.symbols[0].precision == 4 &&
@@ -395,6 +401,63 @@ int main()
                       "超限时在完整行边界截断并显示提示");
         }
     }
+
+    using fxprice::QuoteSource;
+    Check(fxprice::NormalizeSymbol(L"xau/usd.pro") == L"XAUUSD" &&
+              fxprice::DisplaySymbol(L"XAUUSD", QuoteSource::BitgetPro) == L"XAUUSD.pro" &&
+              fxprice::DisplaySymbol(L"XAUUSD", QuoteSource::BitgetEcn) == L"XAUUSD",
+          "Bitget 模式决定后缀，不混用点差");
+    const std::string cfd = R"({"code":"00000","data":[
+        {"symbol":"EURUSD","bid1":"1.09890","ask1":"1.09891","bidOpenPriceChange":"-0.00083","askOpenPriceChange":"0.25"},
+        {"symbol":"EURUSD.s","bid1":"1.09888","ask1":"1.09899","bidOpenPriceChange":"-0.00080"},
+        {"symbol":"EURUSD.pro","bid1":"1.09893","ask1":"1.09893","bidOpenPriceChange":""},
+        {"symbol":"XAUUSD","bid1":"3804.13","ask1":"3804.25"}]})";
+    Check(fxprice::ParseBitgetCfdResponse(cfd, QuoteSource::BitgetEcn, quotes, error) &&
+              quotes.size() == 2 && quotes.at("EURUSD").precision == 5 &&
+              std::abs(quotes.at("EURUSD").midpoint - 1.098905) < 1e-9 &&
+              std::abs(*quotes.at("EURUSD").dailyChangePercent + 0.083) < 1e-9,
+          "CFD ECN 买卖/均值/精度及买价日涨跌比率乘 100");
+    Check(fxprice::ParseBitgetCfdResponse(cfd, QuoteSource::BitgetStandard, quotes, error) &&
+              quotes.size() == 1 && std::abs(quotes.at("EURUSD").bid - 1.09888) < 1e-9,
+          "只使用精确匹配的 .s 模式报价");
+    Check(fxprice::ParseBitgetCfdResponse(cfd, QuoteSource::BitgetPro, quotes, error) &&
+              !quotes.at("EURUSD").dailyChangePercent,
+          "Pro 缺少日涨跌显示未知，不伪造 0%");
+    for (const auto& body : {std::string("[]"), std::string("{bad"),
+            std::string(R"({"code":"40001","data":[]})"),
+            std::string(R"({"code":"00000","data":{}})"),
+            std::string(R"({"code":"00000","data":[{"symbol":"EURUSD.s","bid1":"1","ask1":"2"}]})"),
+            std::string(R"({"code":"00000","data":[{"symbol":"EURUSD","bid1":"2","ask1":"1"}]})"),
+            std::string(R"({"code":"00000","data":[{"symbol":"EURUSD","bid1":"NaN","ask1":"2"}]})"),
+            std::string(R"({"code":"00000","data":[{"symbol":"EURUSD","bid1":"0","ask1":"2"}]})")})
+        Check(!fxprice::ParseBitgetCfdResponse(body, QuoteSource::BitgetEcn, quotes, error) &&
+                  quotes.empty() && !error.empty(), "拒绝错误/非法价格/跨模式回退");
+    transport.responseBody = cfd;
+    fxprice::MarketClient bitget(transport, QuoteSource::BitgetEcn);
+    Check(bitget.Fetch({L"EURUSD", L"XAUUSD"}, quotes, error) && quotes.size() == 2 &&
+              transport.lastHost == L"api.bitget.com" &&
+              transport.lastPath == L"/api/v3/cfd/market/tickers", "Bitget 多标的一次批量请求");
+    Check(bitget.ValidateSymbol(L"EURUSD", error) &&
+              transport.lastPath == L"/api/v3/cfd/market/tickers?symbol=EURUSD",
+          "Bitget 单标的定向校验");
+    Check(!bitget.ValidateSymbol(L"ABCDEF", error), "不能用其他标的代替验证目标");
+    fxprice::MarketClient pro(transport, QuoteSource::BitgetPro);
+    Check(pro.ValidateSymbol(L"EURUSD.pro", error) &&
+              transport.lastPath == L"/api/v3/cfd/market/tickers?symbol=EURUSD.pro", "Pro 请求后缀");
+    transport.responses[L"/api/v3/cfd/market/tickers?symbol=USDJPY.pro"] =
+        R"({"code":"00000","data":[{"symbol":"USDJPY.pro","bid1":"159.45","ask1":"159.46"}]})";
+    const int beforePro = transport.requests;
+    Check(pro.Fetch({L"EURUSD", L"USDJPY"}, quotes, error) && quotes.size() == 2 &&
+              transport.requests == beforePro + 2, "Pro 多标的逐一精确请求，不依赖全量接口");
+    transport.responses[L"/api/v3/cfd/market/tickers?symbol=USDJPY.pro"] =
+        R"({"code":"40001","data":[]})";
+    Check(!pro.Fetch({L"EURUSD", L"USDJPY"}, quotes, error) && quotes.empty(),
+          "Pro 后续请求失败不保留本轮部分数据");
+    transport.succeeds = false;
+    Check(!pro.Fetch({L"EURUSD"}, quotes, error) && quotes.empty(), "网络失败清空输出，无数据源回退");
+    const auto bitgetTooltip = fxprice::BuildCompactTooltip({}, false, QuoteSource::BitgetEcn);
+    Check(bitgetTooltip.find(L"Bitget CFD ECN") != std::wstring::npos &&
+              bitgetTooltip.find(L"买价日涨跌") != std::wstring::npos, "提示准确标注来源及日涨跌口径");
 
     if (failures == 0) std::cout << "All tests passed\n";
     return failures == 0 ? 0 : 1;

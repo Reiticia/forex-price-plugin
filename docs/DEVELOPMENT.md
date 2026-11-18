@@ -2,12 +2,12 @@
 
 ## 1. 项目概述
 
-FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版本为 0.4.0。它通过 biquote.io 公共 API 读取外汇报价，不需要注册、登录、账户 ID 或 API Key。
+FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版本为 0.4.0。它通过 biquote.io 或 Bitget CFD 读取外汇/贵金属报价；当前只发起不带账户或 API Key 的行情请求。
 
 核心约束：
 
 - 配置 1–8 个外汇交易对；
-- 数据源固定为 biquote.io，不提供交易所切换；
+- 全局数据源支持 biquote、Bitget CFD ECN / .s / Pro；Bybit MT5 CFD 不支持 V5，暂不接入；
 - “显示内容”为全局选项：任务栏可独立勾选买一价、卖一价、中间价和日涨跌幅，工具提示同步显示；
 - 小数位数按交易对独立设置（`SymbolConfig.precision`）：-1 自动推断，0–10 固定；
 - 网络请求必须在后台线程执行；
@@ -29,7 +29,7 @@ FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版�
 | --- | --- |
 | `src/PluginInterface.h` | TrafficMonitor API v8 ABI |
 | `src/FxPricePlugin.*` | 插件入口、显示项、后台调度和格式化 |
-| `src/BiquoteClient.*` | biquote.io 的 WinHTTP 客户端与传输抽象 |
+| `src/BiquoteClient.*` | WinHTTP 传输、BiquoteClient 及按来源路由的 MarketClient |
 | `src/MarketData.*` | `/api/latest` 查询串构造与响应解析 |
 | `src/MarketSchedule.h` | 固定 UTC+3 的周末暂停判断 |
 | `src/Quote.*` | 报价结构、符号规范化、精度推断与显示格式化 |
@@ -38,7 +38,7 @@ FxPrice 是面向 TrafficMonitor 的 Windows C++ 外汇行情插件，当前版�
 | `tests/Tests.cpp` | 解析、格式化、配置单元测试 |
 | `tests/PluginSmoke.cpp` | DLL ABI 冒烟测试 |
 | `tests/OptionsTests.cpp` | 模拟行情传输的 Win32 配置窗口自动化测试 |
-| `tests/LiveSmoke.cpp` | 真实 biquote 请求测试 |
+| `tests/LiveSmoke.cpp` | 真实 biquote / Bitget CFD 请求测试 |
 | `tests/PluginLiveSmoke.cpp` | 加载 DLL 端到端刷新测试 |
 | `tests/OptionsPreview.cpp` | 打开 Win32 配置窗口的人工验收入口 |
 
@@ -52,9 +52,9 @@ TrafficMonitor::DataRequired
                     │
                     └─ 后台线程（模块固定防卸载）
                               │
-                              └─ BiquoteClient::Fetch
-                                  ├─ BuildLatestQuery → /api/latest?symbols=...
-                                  └─ ParseLatestResponse → Quote 缓存
+                              └─ MarketClient::Fetch
+                                  ├─ biquote: /api/latest → ParseLatestResponse
+                                  └─ Bitget CFD: /api/v3/cfd/market/tickers → ParseBitgetCfdResponse
                                         │
                                         └─ 回传 pending_，UI 线程应用
 ```
@@ -70,7 +70,7 @@ UTC 21:00 起将星期顺延一天，以固定 UTC+3 判断周六、周日并直
 或纽约时区的开收盘时刻。
 
 添加或替换标的的有效性校验独立于刷新调度：`OptionsWindow` 用 `std::async` 调用
-`BiquoteClient::ValidateSymbol`，只在目标标的返回有效买卖报价后提交到草稿。
+`MarketClient::Fetch`，只在目标标的返回有效买卖报价后提交到草稿。切换数据源时验证全部已配置标的，失败恢复原来源；校验期间冻结来源选择。
 窗口定时器在 UI 线程接收结果，校验期间禁止变更列表及保存；取消时等待请求结束后关闭，
 避免后台任务访问已销毁窗口或在 DLL 卸载后继续执行。仅修改精度不查询行情。
 此用户主动校验在周末也可查询最后报价，但不写入刷新缓存。
@@ -88,7 +88,7 @@ struct SymbolConfig
 ```
 
 - 内部代码统一为 6 位大写字母（如 `EURUSD`）；
-- 展示时显示为 `EURUSD.s`；
+- 展示/请求后缀由 `Settings.source` 决定：biquote / Bitget Standard 为 `.s`，ECN 无后缀，Pro 为 `.pro`；
 - `precision` 为该交易对独立的小数位数，自动模式按行情价格文本推断。
 
 ### DisplayOptions
@@ -111,7 +111,7 @@ struct DisplayOptions
 
 - `symbol`、`description`
 - `bid`、`ask`、`midpoint`（优先服务端 `mid`，缺失按 `(bid+ask)/2` 计算）
-- `dailyChangePercent`（服务端 `dayDiffPercent`，相对前收的日涨跌，非严格滚动 24 小时）
+- `dailyChangePercent`（biquote 为 `dayDiffPercent` 相对前收；Bitget 为 `bidOpenPriceChange × 100` 相对买价日开盘；均非滚动 24 小时）
 - `precision`（解析时按 bid/ask 文本小数位推断的自动精度）
 
 ## 6. 数据源适配
@@ -128,12 +128,40 @@ GET https://biquote.io/api/latest?symbols=EURUSD&symbols=GBPUSD
 - 外汇休市时返回 200 与最后一笔报价，`marketState` 为 `closed`，插件照常显示；
 - 匿名限流 15000 次/分钟/IP，远高于插件刷新频率。
 
+### Bitget CFD
+
+`MarketClient` 将非 biquote 请求路由到 `api.bitget.com/api/v3/cfd/market/tickers`。
+ECN / Standard 多标的一次无参数请求，全量结果按精确模式及配置代码筛选；
+无参数接口实测不含 `.pro`，Pro 必须逐标的请求，任何失败均报告错误，不跨来源或模式回退。
+单标的使用 `?symbol=EURUSD` / `EURUSD.s` / `EURUSD.pro`。
+
+`ParseBitgetCfdResponse` 检查 `code=00000` 与 data 数组；`bid1` / `ask1` 为正且卖价不低于买价，
+中间价取均值。`bidOpenPriceChange` 为比率，乘 100 后存入 `dailyChangePercent`；
+这是买价日开盘口径（不同于 biquote 前收），缺失/非法值保持空，不从 ask 涨跌伪造。
+当前只接受六位字母代码，覆盖外汇及 XAUUSD 等贵金属，不声称支持所有 CFD 品种。
+
+[Bitget 文档](https://www.bitget.com/docs/catalog/cfd-market/cfd-market)标注只读权限，
+当前匿名实测可读但不保证长期开放；权限收紧时显示错误，不存储交易凭据。
+[Bybit 文档](https://bybit-exchange.github.io/docs/v5/tradfi-integration#cfd-mt5-products)
+明确 CFD 属于 MT5、不支持 V5，因此不使用永续替代。
+
+#### CFD WebSocket 核实结果
+
+当前公开 CFD 行情目录只列出 REST tickers 和历史 K 线。
+[UTA WebSocket Tickers Channel](https://www.bitget.com/docs/uta/websocket/public/Tickers-Channel)
+的 `instType` 列举 spot / usdt-futures / coin-futures / usdc-futures，没有 CFD；
+[2026 年 9 月 CFD 上线记录](https://www.bitget.com/docs/uta/changelog/2026-09)
+也没有给出 CFD WebSocket 地址或订阅协议。不能据此断言平台内部不存在推送，但目前不足以实现可靠的公开 CFD WS 客户端。
+因此保持 REST 轮询及 `RefreshSeconds` 生效，不猜测频道、不用普通合约价格替代。
+若后续获得可验证的 CFD 专用协议，才添加推送路径：WS 模式停用轮询间隔，由推送更新 pending 缓存，
+UI 线程在宿主回调中应用；需同时实现心跳、可取消接收、退避重连、配置 generation 隔离及周末暂停。
+
 ## 7. 显示项规则
 
 - `GetItem(0)` 是汇总项，ID 为 `FxPriceSummary`。
 - `GetItem(1..N)` 是各交易对独立项，ID 为 `FxPriceItem0..7`。
 - `GetItemValueText()` 只返回缓存，不能访问网络。
-- 任务栏标的名显示为 `EURUSD.s`；独立项采用自绘以绕过 TrafficMonitor 按 ItemId 缓存旧标签的问题。
+- 任务栏标的名按来源模式显示为 `EURUSD` / `EURUSD.s` / `EURUSD.pro`；独立项采用自绘以绕过 TrafficMonitor 按 ItemId 缓存旧标签的问题。
 - 任务栏格式化拼装勾选的字段：`买:1.15823 卖:1.15829 中:1.15826 涨跌:-0.61%`；汇总项在主价格后追加日涨跌幅，也支持仅显示涨跌幅。涨跌幅固定两位小数并保留正负号，缺失时显示 `--`。
 
 ## 8. 配置文件
@@ -142,6 +170,7 @@ GET https://biquote.io/api/latest?symbols=EURUSD&symbols=GBPUSD
 
 ```ini
 [General]
+Source=biquote
 RefreshSeconds=10
 ShowBid=1
 ShowAsk=1
@@ -158,6 +187,7 @@ Precision1=-1
 
 规则：
 
+- `Source` 为 `biquote` / `bitget-ecn` / `bitget-standard` / `bitget-pro`；缺失/未知回退 biquote，兼容旧配置；
 - `RefreshSeconds` 范围为 2–300；
 - `ShowBid/ShowAsk/ShowMid/ShowChange` 为全局显示开关（0/1），其中 `ShowChange` 同时控制任务栏独立项、汇总项和工具提示中的日涨跌幅；
 - `SymbolN` 为该交易对代码，`PrecisionN` 为该交易对的小数位数（-1 自动，0–10 固定）；

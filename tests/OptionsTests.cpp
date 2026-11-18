@@ -123,6 +123,7 @@ struct Scenario
     bool needsValidation{true};
     int stage{};
     ULONGLONG started{GetTickCount64()};
+    int sourceIndex{-1};
 };
 Scenario* active{};
 
@@ -150,6 +151,15 @@ void CALLBACK DriveWindow(HWND, UINT, UINT_PTR, DWORD)
         CheckLayout(window);
         SetWindowTextW(GetDlgItem(window, kRefreshEdit), L"31");
         SendDlgItemMessageW(window, kShowBid, BM_SETCHECK, BST_UNCHECKED, 0);
+        if (scenario.sourceIndex >= 0)
+        {
+            Check(IsWindowEnabled(GetDlgItem(window, kSourceCombo)), "数据源可切换");
+            SendDlgItemMessageW(window, kSourceCombo, CB_SETCURSEL, scenario.sourceIndex, 0);
+            SendMessageW(window, WM_COMMAND, MAKEWPARAM(kSourceCombo, CBN_SELCHANGE), 0);
+            Check(!IsWindowEnabled(GetDlgItem(window, kSourceCombo)) &&
+                      !IsWindowEnabled(GetDlgItem(window, IDOK)), "数据源校验时冻结切换及保存");
+            return;
+        }
         SetWindowTextW(GetDlgItem(window, kSymbolEdit), scenario.symbol);
         SetWindowTextW(GetDlgItem(window, kPrecisionEdit), L"3");
         SendMessageW(window, WM_COMMAND, scenario.command, 0);
@@ -175,6 +185,13 @@ void CALLBACK DriveWindow(HWND, UINT, UINT_PTR, DWORD)
     const int expectedCount = scenario.valid && scenario.command == kAddButton ? 2 : 1;
     Check(SendDlgItemMessageW(window, kSymbolList, LB_GETCOUNT, 0, 0) == expectedCount,
           "仅校验成功才能添加或更新列表");
+    if (scenario.sourceIndex >= 0)
+    {
+        Check(SendDlgItemMessageW(window, kSourceCombo, CB_GETCURSEL, 0, 0) ==
+                  (scenario.valid ? scenario.sourceIndex : 0), "失败后恢复原数据源选择");
+        if (scenario.valid)
+            SetWindowTextW(GetDlgItem(window, kPrecisionEdit), L"3");
+    }
     if (!scenario.valid)
     {
         wchar_t status[512]{};
@@ -212,6 +229,8 @@ void Run(Scenario scenario, const std::string& response, bool transportSucceeds 
     if (accepted)
     {
         const bool adding = scenario.command == kAddButton;
+        if (scenario.sourceIndex >= 0)
+            Check(settings.source == fxprice::QuoteSource::BitgetEcn, "保存已校验数据源");
         Check(settings.refreshSeconds == 31 && !settings.display.showBid,
               "全局配置随确定保存");
         Check(settings.symbols.size() == (adding ? 2u : 1u), "保存后的标的数量正确");
@@ -248,6 +267,13 @@ int main()
     Run({L"ABCDEF", IDOK, false}, "{}");
     Run({L"EURUSD", kUpdateButton, true, false, false}, "{}", false);
     Run({L"GBPUSD", kAddButton, true, true}, valid);
+    Scenario sourceOk{L"EURUSD", IDOK, true};
+    sourceOk.sourceIndex = 1;
+    Run(sourceOk, R"({"code":"00000","data":[{"symbol":"EURUSD","bid1":"1.1","ask1":"1.2"}]})");
+    Scenario sourceFail{L"EURUSD", IDOK, false};
+    sourceFail.sourceIndex = 1;
+    Run(sourceFail, R"({"code":"40001","data":[]})");
+    Run(sourceFail, R"({"code":"00000","data":[{"symbol":"GBPUSD","bid1":"1.1","ask1":"1.2"}]})");
     if (failures == 0) std::cout << "All options tests passed\n";
     return failures == 0 ? 0 : 1;
 }

@@ -38,4 +38,17 @@ public:
 private:
     IHttpTransport& transport_;
 };
+// 统一路由，禁止静默跨数据源或 CFD 模式回退。
+class MarketClient
+{
+public:
+    MarketClient(IHttpTransport& transport, QuoteSource source)
+        : transport_(transport), source_(source) {}
+    bool Fetch(const std::vector<std::wstring>& symbols,
+               std::unordered_map<std::string, Quote>& quotes, std::string& error);
+    bool ValidateSymbol(const std::wstring& symbol, std::string& error);
+private:
+    IHttpTransport& transport_;
+    QuoteSource source_;
+};
 } // namespace fxprice

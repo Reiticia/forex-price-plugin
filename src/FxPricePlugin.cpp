@@ -257,7 +257,7 @@ void FxPricePlugin::ApplySettings(Settings settings)
         for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
         {
             PriceItem& item = items_[index + 1];
-            const std::wstring display = DisplaySymbol(settings_.symbols[index].code);
+            const std::wstring display = DisplaySymbol(settings_.symbols[index].code, settings_.source);
             item.name_ = L"外汇行情 " + display;
             item.label_ = display + L": ";
             item.value_ = L"--";
@@ -294,7 +294,7 @@ void FxPricePlugin::ApplyPendingResult()
         const auto found = result.quotes.find(symbol);
         const Quote* quote = found == result.quotes.end() ? nullptr : &found->second;
         const std::wstring error = result.success
-            ? L"biquote 未返回该标的" : requestError;
+            ? std::wstring(SourceName(settings_.source)) + L" 未返回该标的" : requestError;
         UpdateItem(index, quote, error, settings_.symbols[index].precision);
     }
     RebuildAggregateAndTooltip();
@@ -371,7 +371,7 @@ void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generati
         for (const SymbolConfig& symbol : settings.symbols)
             codes.push_back(symbol.code);
         WinHttpTransport transport;
-        BiquoteClient client(transport);
+        MarketClient client(transport, settings.source);
         result.success = client.Fetch(codes, result.quotes, result.error);
     }
     catch (const std::exception& exception)
@@ -423,7 +423,7 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
     for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
     {
         const PriceItem& item = items_[index + 1];
-        const std::wstring display = DisplaySymbol(settings_.symbols[index].code);
+        const std::wstring display = DisplaySymbol(settings_.symbols[index].code, settings_.source);
         if (index != 0)
         {
             aggregate.value_ += L" | ";
@@ -441,6 +441,6 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
             line += L"（" + item.detail_.substr(0, 40) + (item.detail_.size() > 40 ? L"…" : L"") + L"）";
         tooltipLines.push_back(std::move(line));
     }
-    tooltip_ = BuildCompactTooltip(tooltipLines, weekendPaused_);
+    tooltip_ = BuildCompactTooltip(tooltipLines, weekendPaused_, settings_.source);
 }
 } // namespace fxprice

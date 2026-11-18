@@ -314,4 +314,54 @@ bool ParseLatestResponse(const std::string& json,
     error.clear();
     return true;
 }
+bool ParseBitgetCfdResponse(const std::string& json, QuoteSource source,
+                            std::unordered_map<std::string, Quote>& quotes,
+                            std::string& error)
+{
+    quotes.clear();
+    JsonValue root;
+    if (!JsonParser(json).Parse(root, error)) return false;
+    std::string code;
+    if (!ReadString(root, "code", code) || code != "00000")
+    {
+        // 不回显任意服务端文本；权限或限流错误不能当作成功行情。
+        error = "Bitget CFD 请求失败（检查权限、限流或服务状态）";
+        return false;
+    }
+    const JsonValue* data = Member(root, "data");
+    if (!data || data->type != JsonValue::Type::Array)
+    {
+        error = "Bitget CFD 响应缺少 data 数组";
+        return false;
+    }
+    for (const auto& value : data->array)
+    {
+        std::string wireSymbol, bid, ask;
+        if (!ReadString(value, "symbol", wireSymbol)) continue;
+        const std::wstring symbol = NormalizeSymbol(std::wstring(wireSymbol.begin(), wireSymbol.end()));
+        if (!IsValidSymbol(symbol) || WideToAscii(DisplaySymbol(symbol, source)) != wireSymbol)
+            continue;
+        Quote quote;
+        quote.symbol = WideToAscii(symbol);
+        if (!ReadString(value, "bid1", bid) || !ReadString(value, "ask1", ask) ||
+            !ParseDecimal(bid, quote.bid) || !ParseDecimal(ask, quote.ask) ||
+            quote.bid <= 0 || quote.ask <= 0 || quote.ask < quote.bid)
+            continue;
+        quote.midpoint = quote.bid / 2 + quote.ask / 2;
+        quote.precision = std::clamp((std::max)(DecimalPlaces(bid), DecimalPlaces(ask)), 0, 10);
+        std::string changeText;
+        double change = 0;
+        if (ReadString(value, "bidOpenPriceChange", changeText) &&
+            ParseDecimal(changeText, change) && std::isfinite(change * 100))
+            quote.dailyChangePercent = change * 100;
+        quotes[quote.symbol] = std::move(quote);
+    }
+    if (quotes.empty())
+    {
+        error = "Bitget CFD 没有该模式的有效外汇/贵金属报价";
+        return false;
+    }
+    error.clear();
+    return true;
+}
 } // namespace fxprice

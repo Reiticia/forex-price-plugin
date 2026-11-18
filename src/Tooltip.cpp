@@ -2,9 +2,13 @@
 
 namespace fxprice
 {
-std::wstring BuildCompactTooltip(const std::vector<std::wstring>& lines, bool weekendPaused)
+std::wstring BuildCompactTooltip(const std::vector<std::wstring>& lines, bool weekendPaused,
+                                 QuoteSource source)
 {
-    std::wstring result = L"biquote.io 外汇行情（◀买一 ▶卖一 ≈中间价 Δ日涨跌，非24h）";
+    std::wstring result = std::wstring(SourceName(source)) +
+        (source == QuoteSource::Biquote
+            ? L" 外汇行情（◀买一 ▶卖一 ≈中间价 Δ日涨跌，非24h）"
+            : L"（◀买一 ▶卖一 ≈中间价 Δ买价日涨跌，非24h）");
     if (weekendPaused) result += L"\n周末休市，已暂停抓取（UTC+3）；周一 00:00 恢复。";
     constexpr wchar_t marker[] = L"\n…（更多见插件设置）";
     constexpr std::size_t contentLimit = kMaxTooltipLength - (sizeof(marker) / sizeof(wchar_t) - 1);

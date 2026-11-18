@@ -72,7 +72,7 @@ bool WinHttpTransport::Get(const std::wstring& host, const std::wstring& path,
                             WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.get(), nullptr))
     {
-        error = WindowsError("biquote 网络请求");
+        error = WindowsError("行情网络请求");
         return false;
     }
 
@@ -88,7 +88,7 @@ bool WinHttpTransport::Get(const std::wstring& host, const std::wstring& path,
     }
     if (statusCode != 200)
     {
-        error = "biquote 返回 HTTP " + std::to_string(statusCode);
+        error = "行情服务返回 HTTP " + std::to_string(statusCode);
         return false;
     }
 
@@ -103,7 +103,7 @@ bool WinHttpTransport::Get(const std::wstring& host, const std::wstring& path,
         if (available == 0) break;
         if (available > kMaxResponseBytes - response.size())
         {
-            error = "biquote 响应超过 1 MiB 限制";
+            error = "行情响应超过 1 MiB 限制";
             return false;
         }
         const std::size_t offset = response.size();
@@ -111,7 +111,7 @@ bool WinHttpTransport::Get(const std::wstring& host, const std::wstring& path,
         DWORD received = 0;
         if (!WinHttpReadData(request.get(), response.data() + offset, available, &received))
         {
-            error = WindowsError("读取 biquote 响应");
+            error = WindowsError("读取行情响应");
             return false;
         }
         response.resize(offset + received);
@@ -149,6 +149,72 @@ bool BiquoteClient::ValidateSymbol(const std::wstring& symbol, std::string& erro
     std::unordered_map<std::string, Quote> quotes;
     if (!Fetch({normalized}, quotes, error)) return false;
     if (quotes.find(WideToAscii(normalized)) == quotes.end())
+    {
+        error = "该交易对不存在或没有有效的买卖报价";
+        return false;
+    }
+    error.clear();
+    return true;
+}
+bool MarketClient::Fetch(const std::vector<std::wstring>& symbols,
+                          std::unordered_map<std::string, Quote>& quotes, std::string& error)
+{
+    quotes.clear();
+    if (source_ == QuoteSource::Biquote)
+        return BiquoteClient(transport_).Fetch(symbols, quotes, error);
+    std::vector<std::wstring> valid;
+    for (const auto& symbol : symbols)
+    {
+        const auto normalized = NormalizeSymbol(symbol);
+        if (IsValidSymbol(normalized)) valid.push_back(normalized);
+    }
+    if (valid.empty())
+    {
+        error = "没有有效的交易对可查询";
+        return false;
+    }
+    // Bitget 的无 symbol 响应不包含 .pro，Pro 必须逐标的精确查询。
+    if (source_ == QuoteSource::BitgetPro && valid.size() > 1)
+    {
+        for (const auto& symbol : valid)
+        {
+            std::unordered_map<std::string, Quote> one;
+            if (!Fetch({symbol}, one, error))
+            {
+                quotes.clear();
+                return false;
+            }
+            quotes.insert(one.begin(), one.end());
+        }
+        return true;
+    }
+    // ECN / .s 多标的一次拉取所有 CFD tickers（实测约 40 KiB）。
+    std::wstring path = L"/api/v3/cfd/market/tickers";
+    if (valid.size() == 1) path += L"?symbol=" + DisplaySymbol(valid[0], source_);
+    std::string response;
+    if (!transport_.Get(L"api.bitget.com", path, response, error)) return false;
+    std::unordered_map<std::string, Quote> all;
+    if (!ParseBitgetCfdResponse(response, source_, all, error)) return false;
+    for (const auto& symbol : valid)
+    {
+        const auto key = WideToAscii(symbol);
+        const auto found = all.find(key);
+        if (found != all.end()) quotes.emplace(key, found->second);
+    }
+    if (quotes.empty())
+    {
+        error = "Bitget CFD 未返回所请求标的的有效买卖报价";
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
+bool MarketClient::ValidateSymbol(const std::wstring& symbol, std::string& error)
+{
+    std::unordered_map<std::string, Quote> quotes;
+    if (!Fetch({symbol}, quotes, error)) return false;
+    if (quotes.find(WideToAscii(NormalizeSymbol(symbol))) == quotes.end())
     {
         error = "该交易对不存在或没有有效的买卖报价";
         return false;

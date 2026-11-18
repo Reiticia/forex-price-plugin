@@ -16,7 +16,8 @@ FxPricePlugin.dll
 
 | 用途 | 域名 |
 | --- | --- |
-| 外汇行情 | `biquote.io` |
+| biquote 外汇行情 | `biquote.io` |
+| Bitget CFD 行情 | `api.bitget.com` |
 
 插件只访问公共行情接口，不需要配置 API Key、账户 ID 或访问令牌。
 
@@ -144,6 +145,6 @@ Precision1=-1
 ## 10. 安全与运维
 
 - 不在 INI 中保存任何账户或令牌字段；
-- 企业网络可按需仅放行 `biquote.io:443`；
+- 企业网络按所选来源放行 `biquote.io:443` 或 `api.bitget.com:443`；Bitget 当前匿名可读不代表长期保证，权限收紧会显示错误；
 - 发布记录应包含版本、架构、构建时间和 SHA-256；
 - 生产升级前应运行离线解析测试和真实行情测试。

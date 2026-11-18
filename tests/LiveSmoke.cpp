@@ -4,10 +4,19 @@
 #include <iostream>
 #include <unordered_map>
 
-int main()
+int main(int argc, char** argv)
 {
+    fxprice::QuoteSource source = fxprice::QuoteSource::Biquote;
+    if (argc > 1)
+    {
+        const std::string name = argv[1];
+        if (name == "bitget-ecn") source = fxprice::QuoteSource::BitgetEcn;
+        else if (name == "bitget-standard") source = fxprice::QuoteSource::BitgetStandard;
+        else if (name == "bitget-pro") source = fxprice::QuoteSource::BitgetPro;
+        else { std::cerr << "Unknown source\n"; return 3; }
+    }
     fxprice::WinHttpTransport transport;
-    fxprice::BiquoteClient client(transport);
+    fxprice::MarketClient client(transport, source);
     std::unordered_map<std::string, fxprice::Quote> quotes;
     std::string error;
     if (!client.Fetch({L"EURUSD", L"USDJPY"}, quotes, error))

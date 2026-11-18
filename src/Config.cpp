@@ -70,6 +70,10 @@ Settings ConfigStore::Load() const
     if (path_.empty() || GetFileAttributesW(path_.c_str()) == INVALID_FILE_ATTRIBUTES)
         return settings;
 
+    const std::wstring source = ReadString(path_, L"General", L"Source");
+    for (const auto candidate : {QuoteSource::BitgetEcn, QuoteSource::BitgetStandard,
+                                  QuoteSource::BitgetPro})
+        if (source == SourceId(candidate)) settings.source = candidate;
     settings.refreshSeconds = std::clamp(
         static_cast<int>(GetPrivateProfileIntW(L"General", L"RefreshSeconds", 10,
                                                path_.c_str())),
@@ -118,6 +122,7 @@ bool ConfigStore::Save(const Settings& settings) const
     std::vector<SymbolConfig> symbols = NormalizeSymbols(settings.symbols);
     if (symbols.empty()) symbols.push_back(SymbolConfig{});
     bool success = true;
+    success &= write(L"General", L"Source", SourceId(settings.source));
     success &= write(L"General", L"RefreshSeconds",
                      std::to_wstring(std::clamp(settings.refreshSeconds, 2, 300)));
     success &= write(L"General", L"ShowBid", settings.display.showBid ? L"1" : L"0");

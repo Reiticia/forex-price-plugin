@@ -32,6 +32,9 @@ constexpr int kPrecisionEdit = 1013;
 constexpr int kSymbolGroup = 1014;
 constexpr int kGlobalGroup = 1015;
 constexpr int kPrecisionHint = 1016;
+constexpr int kChangeHint = 1017;
+constexpr std::array<QuoteSource, 4> kSources{QuoteSource::Biquote, QuoteSource::BitgetEcn,
+                                           QuoteSource::BitgetStandard, QuoteSource::BitgetPro};
 constexpr UINT_PTR kValidationTimer = 1;
 
 std::wstring Utf8ToWide(const std::string& text)
@@ -170,6 +173,18 @@ LRESULT OptionsWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (validation_.valid() && LOWORD(wParam) != IDCANCEL) return 0;
         switch (LOWORD(wParam))
         {
+        case kSourceCombo:
+            if (HIWORD(wParam) == CBN_SELCHANGE)
+            {
+                const auto selected = SendDlgItemMessageW(window_, kSourceCombo, CB_GETCURSEL, 0, 0);
+                if (selected >= 0 && selected < static_cast<LRESULT>(kSources.size()))
+                {
+                    pendingSource_ = kSources[static_cast<std::size_t>(selected)];
+                    if (pendingSource_ != draft_.source)
+                        BeginValidation({}, PendingAction::Source);
+                }
+            }
+            return 0;
         case kSymbolList:
             if (HIWORD(wParam) == LBN_SELCHANGE) LoadSelection();
             return 0;
@@ -244,10 +259,12 @@ void OptionsWindow::CreateControls()
     const HWND source = AddControl(window_, L"COMBOBOX", L"",
                                    WS_TABSTOP | CBS_DROPDOWNLIST,
                                    110, 324, 150, 120, kSourceCombo);
-    SendMessageW(source, CB_ADDSTRING, 0,
-                 reinterpret_cast<LPARAM>(L"biquote.io"));
-    SendMessageW(source, CB_SETCURSEL, 0, 0);
-    EnableWindow(source, FALSE);
+    for (std::size_t index = 0; index < kSources.size(); ++index)
+    {
+        SendMessageW(source, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(SourceName(kSources[index])));
+        if (kSources[index] == draft_.source) SendMessageW(source, CB_SETCURSEL, index, 0);
+    }
 
     AddControl(window_, L"STATIC", L"刷新间隔", 0, 310, 328, kLabelWidth, 20, -1);
     refresh_ = AddControl(window_, L"EDIT",
@@ -276,8 +293,10 @@ void OptionsWindow::CreateControls()
     SendMessageW(showChange_, BM_SETCHECK, draft_.display.showChange ? BST_CHECKED : BST_UNCHECKED, 0);
 
     AddControl(window_, L"STATIC", L"涨跌口径", 0, 30, 378, kLabelWidth, 20, -1);
-    AddControl(window_, L"STATIC", L"相对前收，非严格滚动 24 小时",
-               0, 110, 378, 400, 20, -1);
+    AddControl(window_, L"STATIC", draft_.source == QuoteSource::Biquote
+                   ? L"相对前收，非严格滚动 24 小时"
+                   : L"Bitget 买价相对日开盘；非滚动 24h",
+               0, 110, 378, 400, 20, kChangeHint);
 
     status_ = AddControl(
         window_, L"STATIC",
@@ -297,8 +316,8 @@ void OptionsWindow::RefreshList(int selection)
     SendMessageW(list_, LB_RESETCONTENT, 0, 0);
     for (const SymbolConfig& symbol : draft_.symbols)
     {
-        const std::wstring caption = DisplaySymbol(symbol.code) +
-                                     L"    biquote.io";
+        const std::wstring caption = DisplaySymbol(symbol.code, draft_.source) +
+                                     L"    " + SourceName(draft_.source);
         SendMessageW(list_, LB_ADDSTRING, 0,
                      reinterpret_cast<LPARAM>(caption.c_str()));
     }
@@ -319,7 +338,7 @@ void OptionsWindow::LoadSelection()
     const int index = SelectedIndex();
     if (index < 0 || index >= static_cast<int>(draft_.symbols.size())) return;
     const SymbolConfig& symbol = draft_.symbols[static_cast<std::size_t>(index)];
-    SetWindowTextW(symbol_, DisplaySymbol(symbol.code).c_str());
+    SetWindowTextW(symbol_, DisplaySymbol(symbol.code, draft_.source).c_str());
     if (symbol.precision >= 0)
         SetWindowTextW(precision_, std::to_wstring(symbol.precision).c_str());
     else
@@ -520,7 +539,7 @@ void OptionsWindow::Accept()
 void OptionsWindow::SetValidating(bool validating)
 {
     for (const int id : {kSymbolList, kSymbolEdit, kPrecisionEdit,
-                         kAddButton, kUpdateButton, kRemoveButton, IDOK})
+                         kAddButton, kUpdateButton, kRemoveButton, kSourceCombo, IDOK})
         EnableWindow(GetDlgItem(window_, id), !validating);
 }
 
@@ -528,9 +547,15 @@ void OptionsWindow::BeginValidation(const SymbolConfig& symbol, PendingAction ac
                                     int selection)
 {
     if (validation_.valid()) return;
+    const auto restoreSource = [&] {
+        for (std::size_t i = 0; i < kSources.size(); ++i)
+            if (kSources[i] == draft_.source)
+                SendDlgItemMessageW(window_, kSourceCombo, CB_SETCURSEL, i, 0);
+    };
     // 使用窗口定时器接收结果；后台任务不访问 HWND 或窗口对象。
     if (!SetTimer(window_, kValidationTimer, 100, nullptr))
     {
+        restoreSource();
         SetStatus(L"无法启动标的校验，未添加或保存，请重试。 ");
         return;
     }
@@ -541,17 +566,28 @@ void OptionsWindow::BeginValidation(const SymbolConfig& symbol, PendingAction ac
     SetStatus(L"正在查询该交易对的买卖报价，校验通过后才会添加或保存……");
     try
     {
+        const QuoteSource source = action == PendingAction::Source ? pendingSource_ : draft_.source;
+        std::vector<std::wstring> codes;
+        if (action == PendingAction::Source)
+            for (const auto& item : draft_.symbols) codes.push_back(item.code);
+        else codes.push_back(symbol.code);
         validation_ = std::async(std::launch::async,
-            [transport = &transport_, code = symbol.code] {
-                BiquoteClient client(*transport);
+            [transport = &transport_, source, codes] {
+                if (codes.empty()) return std::string{};
+                MarketClient client(*transport, source);
                 std::string error;
-                if (client.ValidateSymbol(code, error)) return std::string{};
-                return error.empty() ? std::string("无法查询该交易对的价格") : error;
+                std::unordered_map<std::string, Quote> quotes;
+                if (!client.Fetch(codes, quotes, error)) return error;
+                for (const auto& code : codes)
+                    if (quotes.find(WideToAscii(code)) == quotes.end())
+                        return std::string("所选数据源没有全部标的的有效买卖报价");
+                return std::string{};
             });
     }
     catch (const std::exception&)
     {
         KillTimer(window_, kValidationTimer);
+        restoreSource();
         SetValidating(false);
         SetStatus(L"无法启动行情查询，未添加或保存，请重试。 ");
     }
@@ -580,12 +616,23 @@ void OptionsWindow::CompleteValidation()
     }
     if (!error.empty())
     {
+        for (std::size_t i = 0; i < kSources.size(); ++i)
+            if (kSources[i] == draft_.source)
+                SendDlgItemMessageW(window_, kSourceCombo, CB_SETCURSEL, i, 0);
         SetStatus((L"校验失败，未添加或保存：" + Utf8ToWide(error)).c_str());
         SetFocus(symbol_);
         MessageBeep(MB_ICONWARNING);
         return;
     }
-    if (pendingAction_ == PendingAction::Add)
+    if (pendingAction_ == PendingAction::Source)
+    {
+        draft_.source = pendingSource_;
+        RefreshList(draft_.symbols.empty() ? -1 : 0);
+        SetWindowTextW(GetDlgItem(window_, kChangeHint), draft_.source == QuoteSource::Biquote
+            ? L"相对前收，非严格滚动 24 小时" : L"Bitget 买价相对日开盘；非滚动 24h");
+        SetStatus(L"数据源校验通过，点击“确定”保存。模式决定实际报价及点差。");
+    }
+    else if (pendingAction_ == PendingAction::Add)
     {
         draft_.symbols.push_back(pendingSymbol_);
         RefreshList(static_cast<int>(draft_.symbols.size() - 1));

@@ -1,6 +1,6 @@
 # 外汇行情插件
 
-用于 [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) 的外汇行情插件。插件通过 [biquote.io](https://biquote.io/docs/) 公开 API 读取报价，不需要注册、登录、账户 ID 或 API Key。
+用于 [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) 的外汇行情插件。插件支持 [biquote.io](https://biquote.io/docs/) 和 [Bitget CFD](https://www.bitget.com/docs/catalog/cfd-market/cfd-market) 行情，当前均以不带账户或 API Key 的只读请求接入。旧配置默认继续使用 biquote。
 
 > biquote.io 是免费公开行情服务，并非面向第三方开发者承诺长期兼容的正式商业 API，可能调整字段或限流。本插件只读取公开行情，不访问账户，也不执行交易。
 
@@ -20,7 +20,7 @@
 - 提供所有交易对汇总项和各交易对独立显示项；
 - 后台线程批量刷新，不阻塞 TrafficMonitor 界面；
 - 按固定 UTC+3 时间在周六、周日暂停抓取（包括手动刷新），周一自动恢复；
-- 一次请求批量获取全部交易对（`/api/latest?symbols=...`），匿名限流 15000 次/分钟，远高于插件刷新频率；
+- biquote 使用 `/api/latest?symbols=...` 批量获取；Bitget ECN / `.s` 也支持批量抓取，Pro 逐标的请求；
 - 配置保存到 `FxPrice.ini`，不包含任何账户或令牌字段；
 - 支持 TrafficMonitor Plugin API v8。
 
@@ -34,7 +34,7 @@
 4. 可删除选中项并配置 2–300 秒刷新间隔；
 5. 在“任务栏内容”勾选买一价、卖一价、中间价和日涨跌幅；开关同时作用于工具提示；
 6. 在“小数位数”为当前选中的交易对填写 0–10 位固定显示位数，留空则由程序按行情自动判断（每个交易对独立保存）；
-7. 数据源固定为 `biquote.io`。
+7. 在“数据源”选择 `biquote.io`、`Bitget CFD ECN`、`Bitget CFD .s` 或 `Bitget CFD Pro`。切换时后台验证列表中全部标的，失败则保持原来源；通过后点击“确定”保存。
 
 支持以下输入形式，保存时统一规范化：
 
@@ -45,9 +45,19 @@ EUR-USD
 eurusd
 ```
 
-以上均保存为内部代码 `EURUSD`，界面和任务栏显示为 `EURUSD.s`。
+以上均保存为内部代码 `EURUSD`；也接受 `EURUSD.pro` 输入。实际请求及显示后缀由全局数据源模式决定：biquote / Bitget 零手续费模式显示 `.s`，Bitget ECN 无后缀，Pro 为 `.pro`，不同模式不会混用报价。
 
 通过“更新选中项”或直接点击“确定”替换标的时也会校验报价；仅调整已有标的的小数位数或其他显示设置不需要联网。校验期间禁止修改标的或保存；点击取消会放弃操作，并在当前请求结束（或超时）后关闭窗口。
+
+## Bitget / Bybit CFD 接口说明
+
+- **Bitget CFD 已接入**：`GET https://api.bitget.com/api/v3/cfd/market/tickers`，使用 `bid1` / `ask1`，中间价取均值；日涨跌取 `bidOpenPriceChange × 100`，是买价相对日开盘的变化，不是滚动 24 小时，也不等同于 biquote 的相对前收口径。缺失涨跌（Pro 实测为空）显示 `--`。
+- 支持六位字母的外汇 / 贵金属代码，例如 `EURUSD`、`USDJPY`、`XAUUSD`；本次未扩展股票、指数等非六位代码。
+- Bitget 文档标注 `UTA trade (read-only)` 权限及 `10/sec/UID` 限流，但当前环境实测不带认证可读三种模式。**匿名访问并非长期保证**；若接口收紧权限，插件会报错，不自动切换来源，不采集或保存交易凭据。
+- ECN / `.s` 多标的一次请求全量 tickers，再筛选配置；无 `symbol` 的响应实测不含 `.pro`，Pro 逐标的请求，弱网下取消/刷新等待可能更长。单标的校验使用精确 `symbol` 参数。
+- **CFD WebSocket 尚无可核实的公开接入协议**：当前 CFD 行情目录仅列出 REST tickers / 历史 K 线；[WebSocket Tickers Channel](https://www.bitget.com/docs/uta/websocket/public/Tickers-Channel) 的 `instType` 仅包含 spot / usdt-futures / coin-futures / usdc-futures，不包含 CFD。因此本插件继续使用 REST 和刷新间隔，不能将普通合约频道当作 CFD 推送。此结论不代表 Bitget 网页内部或未来不会提供 CFD 推送服务。
+- **Bybit CFD 暂未接入**：[官方 TradFi Integration](https://bybit-exchange.github.io/docs/v5/tradfi-integration#cfd-mt5-products) 明确说明其 CFD 属于 MT5，不能通过 V5 行情端点查询。`XAUUSD.s` CFD 和 `XAUUSDT` 永续不是同一产品。若需 Bybit CFD，应另做登录 MT5 终端的只读桥接；本项目未用永续行情冒充 CFD。
+- 两个已接入来源沿用固定 UTC+3 周末暂停规则，不在周末持续请求；用户主动校验标的不受此限制。
 
 ## 构建
 

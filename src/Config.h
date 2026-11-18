@@ -8,6 +8,41 @@ namespace fxprice
 {
 constexpr std::size_t kMaxSymbols = 8;
 
+// 持久化为稳定字符串，不依赖枚举序号。Bybit MT5 CFD 不属于 V5 API。
+enum class QuoteSource { Biquote, BitgetEcn, BitgetStandard, BitgetPro };
+
+inline const wchar_t* SourceId(QuoteSource source)
+{
+    switch (source)
+    {
+    case QuoteSource::BitgetEcn: return L"bitget-ecn";
+    case QuoteSource::BitgetStandard: return L"bitget-standard";
+    case QuoteSource::BitgetPro: return L"bitget-pro";
+    default: return L"biquote";
+    }
+}
+
+inline const wchar_t* SourceName(QuoteSource source)
+{
+    switch (source)
+    {
+    case QuoteSource::BitgetEcn: return L"Bitget CFD ECN";
+    case QuoteSource::BitgetStandard: return L"Bitget CFD .s";
+    case QuoteSource::BitgetPro: return L"Bitget CFD Pro";
+    default: return L"biquote.io";
+    }
+}
+
+inline const wchar_t* SourceSuffix(QuoteSource source)
+{
+    switch (source)
+    {
+    case QuoteSource::BitgetEcn: return L"";
+    case QuoteSource::BitgetPro: return L".pro";
+    default: return L".s";
+    }
+}
+
 // 单个外汇标的：代码 + 该标的独立的价格小数位数（-1 自动推断，0..10 固定）。
 struct SymbolConfig
 {
@@ -32,6 +67,7 @@ struct DisplayOptions
 
 struct Settings
 {
+    QuoteSource source{QuoteSource::Biquote};
     int refreshSeconds{10};
     std::vector<SymbolConfig> symbols{{}};
     DisplayOptions display;

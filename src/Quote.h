@@ -20,7 +20,7 @@ struct Quote
 
 std::wstring NormalizeSymbol(std::wstring value);
 bool IsValidSymbol(const std::wstring& value);
-std::wstring DisplaySymbol(const std::wstring& value);
+std::wstring DisplaySymbol(const std::wstring& value, QuoteSource source = QuoteSource::Biquote);
 std::string WideToAscii(const std::wstring& value);
 std::wstring FormatNumber(double value, int precision);
 std::wstring FormatPercentage(const std::optional<double>& value);

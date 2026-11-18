@@ -20,7 +20,7 @@ private:
     OptionsWindow(Settings settings, IHttpTransport& transport)
         : draft_(std::move(settings)), transport_(transport) {}
 
-    enum class PendingAction { Add, Update, Accept };
+    enum class PendingAction { Add, Update, Accept, Source };
     void BeginValidation(const SymbolConfig& symbol, PendingAction action, int selection = -1);
     void CompleteValidation();
     void SetValidating(bool validating);
@@ -48,6 +48,7 @@ private:
     SymbolConfig pendingSymbol_;
     PendingAction pendingAction_{PendingAction::Add};
     int pendingSelection_{-1};
+    QuoteSource pendingSource_{QuoteSource::Biquote};
     bool closeRequested_{};
     HWND window_{};
     HWND list_{};

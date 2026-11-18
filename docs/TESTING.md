@@ -101,6 +101,34 @@ ctest --preset win32-release
 
 真实测试最多等待约 20 秒，覆盖 biquote 网络请求往返。
 
+### Bitget CFD
+
+```powershell
+.\build\x64\Release\FxPriceLiveSmoke.exe bitget-ecn
+.\build\x64\Release\FxPriceLiveSmoke.exe bitget-standard
+.\build\x64\Release\FxPriceLiveSmoke.exe bitget-pro
+```
+
+DLL 端到端测试也接受来源参数，并使用临时 INI（退出时清理，不修改实际插件配置）：
+
+```powershell
+.\build\x64\Release\FxPricePluginLiveSmoke.exe .\build\x64\Release\FxPricePlugin.dll bitget-ecn
+.\build\x64\Release\FxPricePluginLiveSmoke.exe .\build\x64\Release\FxPricePlugin.dll bitget-standard
+.\build\x64\Release\FxPricePluginLiveSmoke.exe .\build\x64\Release\FxPricePlugin.dll bitget-pro
+```
+
+端到端刷新仍遵守周末暂停，需在暂停窗口外运行。
+三种模式均使用 WinHTTP 实际请求并检查 EURUSD。ECN / Standard 批量查询，Pro 逐标的。
+Pro 日涨跌字段可能为空，应显示 `--` 而非 0%。匿名访问失败时检查权限、地区、限流和网络；
+不能把认证要求当成不存在接口。默认 CTest 不依赖这些请求。
+
+新增离线测试覆盖精确模式筛选、比率转百分比、买卖均值、缺失涨跌、错误响应、非法价格、
+数据源持久化及旧配置回退；Win32 测试验证切换来源成功、权限失败、目标标的缺失时回滚，
+并检查校验中禁用来源及保存按钮。
+
+手工验收：分别切换三种模式，确认显示后缀/工具提示来源、涨跌口径正确，重启后保持来源；
+先以 EURUSD 再加入 XAUUSD，断网及切换失败不能混入旧来源报价。
+
 ## 7. DLL 导出和架构
 
 ```powershell

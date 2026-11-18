@@ -45,6 +45,8 @@ std::wstring NormalizeSymbol(std::wstring value)
     });
     if (value.size() > 2 && value.substr(value.size() - 2) == L".S")
         value.erase(value.size() - 2);
+    if (value.size() > 4 && value.substr(value.size() - 4) == L".PRO")
+        value.erase(value.size() - 4);
     return value;
 }
 
@@ -56,10 +58,10 @@ bool IsValidSymbol(const std::wstring& value)
            });
 }
 
-std::wstring DisplaySymbol(const std::wstring& value)
+std::wstring DisplaySymbol(const std::wstring& value, QuoteSource source)
 {
     if (!IsValidSymbol(value)) return value;
-    return value + L".s";
+    return value + SourceSuffix(source);
 }
 
 std::string WideToAscii(const std::wstring& value)
