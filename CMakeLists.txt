@@ -75,6 +75,19 @@ if(BUILD_TESTING)
     add_test(NAME FxPriceOptionsTests COMMAND FxPriceOptionsTests)
     set_tests_properties(FxPriceOptionsTests PROPERTIES TIMEOUT 30)
 
+    add_executable(FxPriceRuntimeTests
+        tests/RuntimeTests.cpp src/FxPricePlugin.cpp src/OptionsWindow.cpp
+        src/Config.cpp src/Tooltip.cpp src/MarketData.cpp src/Quote.cpp src/BiquoteClient.cpp)
+    target_include_directories(FxPriceRuntimeTests PRIVATE src)
+    target_compile_features(FxPriceRuntimeTests PRIVATE cxx_std_17)
+    target_compile_definitions(FxPriceRuntimeTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(FxPriceRuntimeTests PRIVATE winhttp user32 gdi32 ws2_32)
+    if(MSVC)
+        target_compile_options(FxPriceRuntimeTests PRIVATE /utf-8 /W4 /permissive- /EHsc)
+    endif()
+    add_test(NAME FxPriceRuntimeTests COMMAND FxPriceRuntimeTests)
+    set_tests_properties(FxPriceRuntimeTests PROPERTIES TIMEOUT 30)
+
     add_executable(FxPriceLiveSmoke
         tests/LiveSmoke.cpp
         src/MarketData.cpp
@@ -104,6 +117,29 @@ if(BUILD_TESTING)
     if(MSVC)
         target_compile_options(FxPricePluginLiveSmoke PRIVATE /utf-8 /W4 /permissive- /EHsc)
     endif()
+
+    add_library(FxPriceLifecycleFixture SHARED tests/LifecycleFixture.cpp
+        src/FxPricePlugin.cpp src/OptionsWindow.cpp src/Config.cpp src/Tooltip.cpp
+        src/MarketData.cpp src/Quote.cpp src/BiquoteClient.cpp)
+    target_include_directories(FxPriceLifecycleFixture PRIVATE src)
+    target_compile_features(FxPriceLifecycleFixture PRIVATE cxx_std_17)
+    target_compile_definitions(FxPriceLifecycleFixture PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(FxPriceLifecycleFixture PRIVATE winhttp user32 gdi32)
+    if(MSVC)
+        target_compile_options(FxPriceLifecycleFixture PRIVATE /utf-8 /W4 /permissive- /EHsc)
+    endif()
+    add_executable(FxPriceLifecycleTests tests/LifecycleTests.cpp)
+    target_include_directories(FxPriceLifecycleTests PRIVATE src)
+    target_compile_features(FxPriceLifecycleTests PRIVATE cxx_std_17)
+    target_compile_definitions(FxPriceLifecycleTests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        target_compile_options(FxPriceLifecycleTests PRIVATE /utf-8 /W4 /permissive- /EHsc)
+    endif()
+    add_dependencies(FxPriceLifecycleTests FxPricePlugin FxPriceLifecycleFixture)
+    add_test(NAME FxPriceLifecycleTests COMMAND FxPriceLifecycleTests $<TARGET_FILE:FxPricePlugin>)
+    add_test(NAME FxPriceControlledUnload COMMAND FxPriceLifecycleTests $<TARGET_FILE:FxPriceLifecycleFixture>)
+    set_tests_properties(FxPriceControlledUnload PROPERTIES TIMEOUT 10)
+    set_tests_properties(FxPriceLifecycleTests PROPERTIES TIMEOUT 35)
 
     add_executable(FxPricePluginSmoke tests/PluginSmoke.cpp)
     target_include_directories(FxPricePluginSmoke PRIVATE src)

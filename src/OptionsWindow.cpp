@@ -96,6 +96,10 @@ bool OptionsWindow::Show(HWND parent, Settings& settings, IHttpTransport* transp
         }
     }
 
+    // Also cover WM_QUIT / GetMessage failure without abandoning a running task.
+    if (dialog.request_) dialog.request_->Cancel();
+    if (dialog.validation_.valid()) dialog.validation_.wait();
+    if (IsWindow(dialog.window_)) DestroyWindow(dialog.window_);
     if (parentWasEnabled)
     {
         EnableWindow(parent, TRUE);
@@ -571,10 +575,11 @@ void OptionsWindow::BeginValidation(const SymbolConfig& symbol, PendingAction ac
         if (action == PendingAction::Source)
             for (const auto& item : draft_.symbols) codes.push_back(item.code);
         else codes.push_back(symbol.code);
+        request_ = std::make_shared<RequestControl>();
         validation_ = std::async(std::launch::async,
-            [transport = &transport_, source, codes] {
+            [transport = &transport_, source, codes, control = request_] {
                 if (codes.empty()) return std::string{};
-                MarketClient client(*transport, source);
+                MarketClient client(*transport, source, control);
                 std::string error;
                 std::unordered_map<std::string, Quote> quotes;
                 if (!client.Fetch(codes, quotes, error)) return error;
@@ -655,9 +660,9 @@ void OptionsWindow::Close()
 {
     if (validation_.valid())
     {
-        // 等待有超时限制的请求结束再销毁，防止窗口或 DLL 卸载后线程仍在运行。
         closeRequested_ = true;
-        SetStatus(L"已取消操作，等待行情查询结束后关闭，不会保存更改……");
+        if (request_) request_->Cancel();
+        SetStatus(L"正在取消行情请求，不会保存更改……");
         return;
     }
     DestroyWindow(window_);

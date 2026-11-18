@@ -47,14 +47,14 @@ eurusd
 
 以上均保存为内部代码 `EURUSD`；也接受 `EURUSD.pro` 输入。实际请求及显示后缀由全局数据源模式决定：biquote / Bitget 零手续费模式显示 `.s`，Bitget ECN 无后缀，Pro 为 `.pro`，不同模式不会混用报价。
 
-通过“更新选中项”或直接点击“确定”替换标的时也会校验报价；仅调整已有标的的小数位数或其他显示设置不需要联网。校验期间禁止修改标的或保存；点击取消会放弃操作，并在当前请求结束（或超时）后关闭窗口。
+通过“更新选中项”或直接点击“确定”替换标的时也会校验报价；仅调整已有标的的小数位数或其他显示设置不需要联网。校验期间禁止修改标的或保存；点击取消会中止当前请求，待异步回调安全退出后关闭窗口；整轮校验共用 20 秒请求预算。
 
 ## Bitget / Bybit CFD 接口说明
 
 - **Bitget CFD 已接入**：`GET https://api.bitget.com/api/v3/cfd/market/tickers`，使用 `bid1` / `ask1`，中间价取均值；日涨跌取 `bidOpenPriceChange × 100`，是买价相对日开盘的变化，不是滚动 24 小时，也不等同于 biquote 的相对前收口径。缺失涨跌（Pro 实测为空）显示 `--`。
 - 支持六位字母的外汇 / 贵金属代码，例如 `EURUSD`、`USDJPY`、`XAUUSD`；本次未扩展股票、指数等非六位代码。
 - Bitget 文档标注 `UTA trade (read-only)` 权限及 `10/sec/UID` 限流，但当前环境实测不带认证可读三种模式。**匿名访问并非长期保证**；若接口收紧权限，插件会报错，不自动切换来源，不采集或保存交易凭据。
-- ECN / `.s` 多标的一次请求全量 tickers，再筛选配置；无 `symbol` 的响应实测不含 `.pro`，Pro 逐标的请求，弱网下取消/刷新等待可能更长。单标的校验使用精确 `symbol` 参数。
+- ECN / `.s` 多标的一次请求全量 tickers，再筛选配置；无 `symbol` 的响应实测不含 `.pro`，Pro 逐标的请求，所有子请求共用 20 秒请求预算，支持取消，不按标的累积总超时。单标的校验使用精确 `symbol` 参数。
 - **CFD WebSocket 尚无可核实的公开接入协议**：当前 CFD 行情目录仅列出 REST tickers / 历史 K 线；[WebSocket Tickers Channel](https://www.bitget.com/docs/uta/websocket/public/Tickers-Channel) 的 `instType` 仅包含 spot / usdt-futures / coin-futures / usdc-futures，不包含 CFD。因此本插件继续使用 REST 和刷新间隔，不能将普通合约频道当作 CFD 推送。此结论不代表 Bitget 网页内部或未来不会提供 CFD 推送服务。
 - **Bybit CFD 暂未接入**：[官方 TradFi Integration](https://bybit-exchange.github.io/docs/v5/tradfi-integration#cfd-mt5-products) 明确说明其 CFD 属于 MT5，不能通过 V5 行情端点查询。`XAUUSD.s` CFD 和 `XAUUSDT` 永续不是同一产品。若需 Bybit CFD，应另做登录 MT5 终端的只读桥接；本项目未用永续行情冒充 CFD。
 - 两个已接入来源沿用固定 UTC+3 周末暂停规则，不在周末持续请求；用户主动校验标的不受此限制。
@@ -132,7 +132,7 @@ EURUSD.s: ◀1.15823 ▶1.15829 ≈1.15826 Δ-0.61%
 - 添加或替换标的时会主动查询报价进行有效性校验（包括周末，可使用接口返回的最后有效报价）；此查询仅用于校验，不更新任务栏缓存，也不改变周末暂停刷新的规则；
 - 不存在或没有有效买卖报价的标的不能通过配置界面添加或替换；旧配置或手工修改 INI 中的无效标的仍可能显示 `--`；
 - 网络代理、TLS 或区域访问限制都可能导致刷新失败；
-- 插件将单次响应限制为 1 MiB，并配置连接、发送和接收超时；
+- 插件将单次响应限制为 1 MiB，配置阶段超时及整轮 20 秒请求预算；取消/超时会中止 WinHTTP I/O，随后等待回调安全收尾；
 - 若对数据稳定性、正式 SLA 或严格滚动 24 小时计算有要求，应改用需要认证的正式行情提供商。
 
 ## 许可证

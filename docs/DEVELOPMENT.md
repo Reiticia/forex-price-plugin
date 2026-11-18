@@ -56,10 +56,22 @@ TrafficMonitor::DataRequired
                                   ├─ biquote: /api/latest → ParseLatestResponse
                                   └─ Bitget CFD: /api/v3/cfd/market/tickers → ParseBitgetCfdResponse
                                         │
-                                        └─ 回传 pending_，UI 线程应用
+                                        └─ 回传 pending_，宿主监控线程应用并发布不可变快照
 ```
 
-设置变化时 generation 递增。旧设置启动的迟到响应会被丢弃，避免切换交易对后短暂显示旧数据。
+TrafficMonitor 1.85.1 的 `DataRequired` 在监控线程调用，不是 UI 线程。
+`stateMutex_` 串行保护设置、generation、调度、pending 和显示草稿；配置切换、generation 递增、
+结果校验及应用处于同一同步边界，旧结果不得写入新配置。`configMutex_` 单独串行保护 INI 访问。
+
+显示项及 tooltip 使用 `PublishedSnapshot` 发布不可变快照。每个线程/每个 getter 固定住最近快照，
+返回的文本指针有效至同线程再次调用同一对象的同一 getter，或插件卸载；不同 getter 不会互相释放文本。
+绘制和宽度测量一次读取同一快照。保留槽位由插件拥有，不使用可能在 DLL 卸载后执行析构的 TLS 对象；
+内存按调用线程数/访问器数保留最近快照，不按报价次数累积。
+
+后台刷新使用原生线程入口和普通 DLL 引用。工作函数正常返回、所有 C++ 局部对象及 WinHTTP 回调清理完成后，
+外层入口才调用 `FreeLibraryAndExitThread`。`DllMain` 不调用单例、不加锁、不等待线程；静态析构无 join。
+宿主释放其 DLL 引用时，进行中的工作保持模块存活直至完成/超时；无官方卸载回调，不能在宿主 FreeLibrary 时主动收到取消通知。
+显式 `Shutdown`（非 DllMain）及配置切换可取消旧请求。
 
 `StartRefresh` 在检查刷新间隔和启动后台线程之前，通过 `GetSystemTime` 读取 UTC：
 UTC 21:00 起将星期顺延一天，以固定 UTC+3 判断周六、周日并直接返回，`force` 不能绕过。
@@ -71,9 +83,14 @@ UTC 21:00 起将星期顺延一天，以固定 UTC+3 判断周六、周日并直
 
 添加或替换标的的有效性校验独立于刷新调度：`OptionsWindow` 用 `std::async` 调用
 `MarketClient::Fetch`，只在目标标的返回有效买卖报价后提交到草稿。切换数据源时验证全部已配置标的，失败恢复原来源；校验期间冻结来源选择。
-窗口定时器在 UI 线程接收结果，校验期间禁止变更列表及保存；取消时等待请求结束后关闭，
+窗口定时器在 UI 线程接收结果，校验期间禁止变更列表及保存；取消时立即置位请求取消，等异步请求及回调安全退出后关闭，
 避免后台任务访问已销毁窗口或在 DLL 卸载后继续执行。仅修改精度不查询行情。
 此用户主动校验在周末也可查询最后报价，但不写入刷新缓存。
+
+每轮刷新/校验共用 `RequestControl`，默认总预算 20 秒（包括所有 Pro 子请求），每次独立 Fetch 创建新预算。
+WinHTTP 异步等待每 25ms 检查取消/截止时间；终止时关闭请求、连接、会话，使用
+`WINHTTP_OPTION_UNLOAD_NOTIFY_EVENT` 确认最后回调已返回，随后才能销毁回调状态及释放 DLL 引用。
+因此 20 秒是请求预算，不包含 Windows 完成安全回调收尾所需时间；不能为硬期限强行卸载仍在回调中的模块。
 
 ## 5. 统一数据模型
 
@@ -154,7 +171,7 @@ ECN / Standard 多标的一次无参数请求，全量结果按精确模式及�
 也没有给出 CFD WebSocket 地址或订阅协议。不能据此断言平台内部不存在推送，但目前不足以实现可靠的公开 CFD WS 客户端。
 因此保持 REST 轮询及 `RefreshSeconds` 生效，不猜测频道、不用普通合约价格替代。
 若后续获得可验证的 CFD 专用协议，才添加推送路径：WS 模式停用轮询间隔，由推送更新 pending 缓存，
-UI 线程在宿主回调中应用；需同时实现心跳、可取消接收、退避重连、配置 generation 隔离及周末暂停。
+在宿主回调中发布显示快照；需同时实现心跳、可取消接收、退避重连、配置 generation 隔离及周末暂停。
 
 ## 7. 显示项规则
 

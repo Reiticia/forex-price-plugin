@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cwchar>
 #include <exception>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -46,12 +47,13 @@ Settings NormalizeSettings(Settings settings)
 int PriceItem::GetItemWidthEx(void* hdc) const
 {
     if (!customDraw_ || !hdc) return 0;
-    const std::wstring sample = label_ + sample_;
+    const auto view = published_.Load();
+    const std::wstring sample = view->label + view->sample;
     SIZE size{}, actualSize{};
     if (!GetTextExtentPoint32W(static_cast<HDC>(hdc), sample.c_str(),
                                static_cast<int>(sample.size()), &size)) return 0;
     // 布局重新测量时，异常大价格/涨跌也不能比已知实际文本窄。
-    const std::wstring actual = label_ + value_;
+    const std::wstring actual = view->label + view->value;
     GetTextExtentPoint32W(static_cast<HDC>(hdc), actual.c_str(),
                           static_cast<int>(actual.size()), &actualSize);
     return (std::max)(size.cx, actualSize.cx);
@@ -61,6 +63,9 @@ void PriceItem::DrawItem(void* hdc, int x, int y, int width, int height, bool)
 {
     if (!customDraw_ || !hdc || width <= 0 || height <= 0) return;
 
+    const auto view = published_.Load();
+    const auto& label = view->label;
+    const auto& value = view->value;
     HDC deviceContext = static_cast<HDC>(hdc);
     const int saved = SaveDC(deviceContext);
     SetBkMode(deviceContext, TRANSPARENT);
@@ -75,18 +80,18 @@ void PriceItem::DrawItem(void* hdc, int x, int y, int width, int height, bool)
 
     RECT labelRect{x, y, x + width, y + height};
     SIZE labelSize{};
-    GetTextExtentPoint32W(deviceContext, label_.c_str(), static_cast<int>(label_.size()),
+    GetTextExtentPoint32W(deviceContext, label.c_str(), static_cast<int>(label.size()),
                           &labelSize);
     labelRect.right = (std::min)(labelRect.right, labelRect.left + labelSize.cx);
     SetTextColor(deviceContext, labelColor);
-    DrawTextW(deviceContext, label_.c_str(), static_cast<int>(label_.size()), &labelRect,
+    DrawTextW(deviceContext, label.c_str(), static_cast<int>(label.size()), &labelRect,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
     const LONG valueLeft = (std::min)(static_cast<LONG>(x) + labelSize.cx,
                                       static_cast<LONG>(x + width));
     RECT valueRect{valueLeft, y, x + width, y + height};
     SetTextColor(deviceContext, valueColor);
-    DrawTextW(deviceContext, value_.c_str(), static_cast<int>(value_.size()), &valueRect,
+    DrawTextW(deviceContext, value.c_str(), static_cast<int>(value.size()), &valueRect,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     if (saved != 0) RestoreDC(deviceContext, saved);
 }
@@ -97,7 +102,7 @@ FxPricePlugin& FxPricePlugin::Instance()
     return instance;
 }
 
-FxPricePlugin::FxPricePlugin()
+FxPricePlugin::FxPricePlugin(IHttpTransport* transport) : transportOverride_(transport)
 {
     items_[0].id_ = L"FxPriceSummary";
     items_[0].name_ = L"外汇行情汇总";
@@ -114,24 +119,21 @@ FxPricePlugin::FxPricePlugin()
     ApplySettings(settings_);
 }
 
-// 函数内静态单例的析构通常不会执行（宿主 FreeLibrary 不运行静态对象
-// 析构）；卸载安全由 DLL_PROCESS_DETACH 的 Shutdown() 与启动线程前
-// 获取的普通模块引用共同保证。此处保留析构仅作防御。
-FxPricePlugin::~FxPricePlugin()
-{
-    shuttingDown_ = true;
-    if (worker_.joinable()) worker_.join();
-}
+// Workers hold a module reference until all C++ objects have unwound.
+// No thread join/wait in DLL static destruction or DllMain.
+FxPricePlugin::~FxPricePlugin() = default;
 
 void FxPricePlugin::Shutdown()
 {
+    std::lock_guard<std::mutex> lock(stateMutex_);
     shuttingDown_ = true;
+    if (request_) request_->Cancel();
 }
 
 IPluginItem* FxPricePlugin::GetItem(int index)
 {
     if (index < 0) return nullptr;
-    std::lock_guard<std::mutex> lock(settingsMutex_);
+    std::lock_guard<std::mutex> lock(stateMutex_);
     const std::size_t count = settings_.symbols.size() + 1;
     if (static_cast<std::size_t>(index) >= count ||
         static_cast<std::size_t>(index) >= items_.size())
@@ -149,13 +151,15 @@ ITMPlugin::OptionReturn FxPricePlugin::ShowOptionsDialog(void* parent)
 {
     Settings draft;
     {
-        std::lock_guard<std::mutex> lock(settingsMutex_);
+        std::lock_guard<std::mutex> lock(stateMutex_);
         draft = settings_;
     }
     if (!OptionsWindow::Show(static_cast<HWND>(parent), draft))
         return OR_OPTION_UNCHANGED;
     draft = NormalizeSettings(std::move(draft));
-    if (!config_.Save(draft))
+    bool saved;
+    { std::lock_guard<std::mutex> lock(configMutex_); saved = config_.Save(draft); }
+    if (!saved)
         MessageBoxW(static_cast<HWND>(parent),
                     L"无法保存 FxPrice.ini，请检查插件配置目录权限。",
                     L"外汇行情", MB_OK | MB_ICONWARNING);
@@ -187,8 +191,10 @@ void FxPricePlugin::OnExtenedInfo(ExtendedInfoIndex index, const wchar_t* data)
     case EI_CONFIG_DIR:
         if (*data)
         {
-            config_.SetDirectory(data);
-            ApplySettings(config_.Load());
+            Settings loaded;
+            { std::lock_guard<std::mutex> lock(configMutex_);
+              config_.SetDirectory(data); loaded = config_.Load(); }
+            ApplySettings(std::move(loaded));
             StartRefresh(true);
         }
         break;
@@ -212,8 +218,10 @@ void FxPricePlugin::OnInitialize(ITrafficMonitor* application)
     const wchar_t* directory = application->GetPluginConfigDir();
     if (directory && *directory)
     {
-        config_.SetDirectory(directory);
-        ApplySettings(config_.Load());
+        Settings loaded;
+        { std::lock_guard<std::mutex> lock(configMutex_);
+          config_.SetDirectory(directory); loaded = config_.Load(); }
+        ApplySettings(std::move(loaded));
     }
 }
 
@@ -231,7 +239,10 @@ void FxPricePlugin::ApplySettings(Settings settings)
 {
     settings = NormalizeSettings(std::move(settings));
     {
-        std::lock_guard<std::mutex> lock(settingsMutex_);
+        std::lock_guard<std::mutex> lock(stateMutex_);
+        if (request_) request_->Cancel();
+        ++generation_;
+        nextRefresh_ = std::chrono::steady_clock::time_point{};
         settings_ = std::move(settings);
         for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
         {
@@ -250,24 +261,16 @@ void FxPricePlugin::ApplySettings(Settings settings)
         items_[0].value_ = L"等待行情";
         RebuildAggregateAndTooltip();
     }
-    ++generation_;
-    std::lock_guard<std::mutex> refreshLock(refreshMutex_);
-    nextRefresh_ = std::chrono::steady_clock::time_point{};
 }
 
 void FxPricePlugin::ApplyPendingResult()
 {
-    PendingResult result;
-    {
-        std::lock_guard<std::mutex> lock(pendingMutex_);
-        if (!hasPending_) return;
-        result = std::move(pending_);
-        hasPending_ = false;
-    }
-    if (result.generation != generation_.load()) return;
-
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    if (!hasPending_) return;
+    PendingResult result = std::move(pending_);
+    hasPending_ = false;
+    if (result.generation != generation_) return;
     const std::wstring requestError = Utf8ToWide(result.error);
-    std::lock_guard<std::mutex> lock(settingsMutex_);
     for (std::size_t index = 0; index < settings_.symbols.size(); ++index)
     {
         const std::string symbol = WideToAscii(settings_.symbols[index].code);
@@ -280,9 +283,40 @@ void FxPricePlugin::ApplyPendingResult()
     RebuildAggregateAndTooltip();
 }
 
+struct FxPricePlugin::WorkerContext
+{
+    FxPricePlugin* plugin;
+    Settings settings;
+    unsigned long long generation;
+    std::shared_ptr<RequestControl> control;
+    HMODULE module;
+};
+
+DWORD WINAPI FxPricePlugin::WorkerEntry(void* raw)
+{
+    const HMODULE module = static_cast<WorkerContext*>(raw)->module;
+    {
+        // The only ExitThread call is AFTER this scope has unwound all C++
+        // state, including settings, quotes, transport callbacks and context.
+        std::unique_ptr<WorkerContext> context(static_cast<WorkerContext*>(raw));
+        try
+        {
+            context->plugin->RefreshWorker(context->settings, context->generation, context->control);
+        }
+        catch (...)
+        {
+            std::lock_guard<std::mutex> lock(context->plugin->stateMutex_);
+            context->plugin->workerRunning_ = false;
+            if (context->plugin->request_ == context->control)
+                context->plugin->request_.reset();
+        }
+    }
+    FreeLibraryAndExitThread(module, 0);
+}
+
 void FxPricePlugin::StartRefresh(bool force)
 {
-    std::lock_guard<std::mutex> refreshLock(refreshMutex_);
+    std::lock_guard<std::mutex> lock(stateMutex_);
     if (shuttingDown_) return;
 
     // 固定 UTC+3，不使用电脑本地时区或夏令时；UTC 21:00 起为下一天。
@@ -290,13 +324,10 @@ void FxPricePlugin::StartRefresh(bool force)
     SYSTEMTIME utcTime{};
     GetSystemTime(&utcTime);
     const bool weekend = IsWeekendUtc3(utcTime.wDayOfWeek, utcTime.wHour);
+    if (weekendPaused_ != weekend)
     {
-        std::lock_guard<std::mutex> lock(settingsMutex_);
-        if (weekendPaused_ != weekend)
-        {
-            weekendPaused_ = weekend;
-            RebuildAggregateAndTooltip();
-        }
+        weekendPaused_ = weekend;
+        RebuildAggregateAndTooltip();
     }
     if (weekend)
     {
@@ -308,15 +339,15 @@ void FxPricePlugin::StartRefresh(bool force)
     const auto now = std::chrono::steady_clock::now();
     if (force) nextRefresh_ = std::chrono::steady_clock::time_point{};
     if (workerRunning_ || now < nextRefresh_) return;
-    if (worker_.joinable()) worker_.join();
+    nextRefresh_ = now + std::chrono::seconds(settings_.refreshSeconds);
+    LaunchWorkerLocked();
+}
 
-    Settings snapshot;
-    {
-        std::lock_guard<std::mutex> lock(settingsMutex_);
-        snapshot = settings_;
-    }
-    nextRefresh_ = now + std::chrono::seconds(snapshot.refreshSeconds);
-    const unsigned long long generation = generation_.load();
+void FxPricePlugin::LaunchWorkerLocked()
+{
+    if (workerRunning_ || shuttingDown_) return;
+    Settings snapshot = settings_;
+    const unsigned long long generation = generation_;
     workerRunning_ = true;
     HMODULE module = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
@@ -328,8 +359,13 @@ void FxPricePlugin::StartRefresh(bool force)
     }
     try
     {
-        worker_ = std::thread(&FxPricePlugin::RefreshWorker, this,
-                              std::move(snapshot), generation, module);
+        request_ = std::make_shared<RequestControl>();
+        auto context = std::make_unique<WorkerContext>(WorkerContext{
+            this, std::move(snapshot), generation, request_, module});
+        HANDLE thread = CreateThread(nullptr, 0, WorkerEntry, context.get(), 0, nullptr);
+        if (!thread) throw std::runtime_error("CreateThread failed");
+        context.release();
+        CloseHandle(thread);
     }
     catch (...)
     {
@@ -339,8 +375,8 @@ void FxPricePlugin::StartRefresh(bool force)
     }
 }
 
-void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generation,
-                                  HMODULE module)
+void FxPricePlugin::RefreshWorker(const Settings& settings, unsigned long long generation,
+                                  const std::shared_ptr<RequestControl>& control)
 {
     PendingResult result;
     result.generation = generation;
@@ -351,7 +387,7 @@ void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generati
         for (const SymbolConfig& symbol : settings.symbols)
             codes.push_back(symbol.code);
         WinHttpTransport transport;
-        MarketClient client(transport, settings.source);
+        MarketClient client(transportOverride_ ? *transportOverride_ : transport, settings.source, control);
         result.success = client.Fetch(codes, result.quotes, result.error);
     }
     catch (const std::exception& exception)
@@ -363,14 +399,14 @@ void FxPricePlugin::RefreshWorker(Settings settings, unsigned long long generati
         result.error = "行情刷新发生未知异常";
     }
 
-    if (!shuttingDown_)
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    if (!shuttingDown_ && generation == generation_)
     {
-        std::lock_guard<std::mutex> lock(pendingMutex_);
         pending_ = std::move(result);
         hasPending_ = true;
     }
     workerRunning_ = false;
-    FreeLibraryAndExitThread(module, 0);
+    if (request_ == control) request_.reset();
 }
 
 void FxPricePlugin::UpdateItem(std::size_t index, const Quote* quote,
@@ -423,5 +459,7 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
         tooltipLines.push_back(std::move(line));
     }
     tooltip_ = BuildCompactTooltip(tooltipLines, weekendPaused_, settings_.source);
+    for (auto& item : items_) item.Publish();
+    publishedTooltip_.Publish(tooltip_);
 }
 } // namespace fxprice

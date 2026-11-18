@@ -109,6 +109,20 @@ public:
         return succeeds;
     }
 
+    bool GetControlled(const std::wstring& host, const std::wstring& path,
+                       std::string& response, std::string& error,
+                       const std::shared_ptr<fxprice::RequestControl>& control) override
+    {
+        if (!blockUntilCancel)
+            return IHttpTransport::GetControlled(host, path, response, error, control);
+        ++requests;
+        entered = true;
+        while (control->Check(error)) Sleep(5);
+        cancelled = true;
+        return false;
+    }
+    std::atomic<bool> entered{}, cancelled{};
+    bool blockUntilCancel{};
     std::string body;
     bool succeeds{true};
     std::atomic<int> requests{};
@@ -124,7 +138,9 @@ struct Scenario
     int stage{};
     ULONGLONG started{GetTickCount64()};
     int sourceIndex{-1};
+    bool cancelInFlight{};
 };
+FakeTransport* activeTransport{};
 Scenario* active{};
 
 void CALLBACK DriveWindow(HWND, UINT, UINT_PTR, DWORD)
@@ -172,9 +188,14 @@ void CALLBACK DriveWindow(HWND, UINT, UINT_PTR, DWORD)
             // 重复点击（包括直接发送命令）不能启动第二次请求或绕过校验。
             SendMessageW(window, WM_COMMAND, kAddButton, 0);
             SendMessageW(window, WM_COMMAND, IDOK, 0);
-            if (scenario.cancel)
+            if (scenario.cancel && !scenario.cancelInFlight)
                 SendMessageW(window, WM_CLOSE, 0, 0);
         }
+        return;
+    }
+    if (scenario.cancelInFlight && activeTransport->entered)
+    {
+        SendMessageW(window, WM_CLOSE, 0, 0);
         return;
     }
     if (!IsWindowEnabled(GetDlgItem(window, IDOK))) return;
@@ -212,6 +233,8 @@ void Run(Scenario scenario, const std::string& response, bool transportSucceeds 
     FakeTransport transport;
     transport.body = response;
     transport.succeeds = transportSucceeds;
+    transport.blockUntilCancel = scenario.cancelInFlight;
+    activeTransport = &transport;
     fxprice::Settings settings;
     settings.symbols = {fxprice::SymbolConfig{L"EURUSD", -1}};
     settings.refreshSeconds = 15;
@@ -223,9 +246,14 @@ void Run(Scenario scenario, const std::string& response, bool transportSucceeds 
     const bool accepted = fxprice::OptionsWindow::Show(nullptr, settings, &transport);
     KillTimer(nullptr, timer);
     active = nullptr;
+    activeTransport = nullptr;
+    if (scenario.cancelInFlight)
+        Check(transport.cancelled && GetTickCount64() - scenario.started < 2000,
+              "关闭窗口中止进行中的校验请求");
     Check(accepted == (scenario.valid && !scenario.cancel), "校验结果决定能否保存");
-    Check(transport.requests == (scenario.needsValidation ? 1 : 0),
-          "每次变更只查询一次，修改精度无需联网");
+    Check(scenario.cancel ? transport.requests <= 1 :
+              transport.requests == (scenario.needsValidation ? 1 : 0),
+          "变更只查询一次，取消可在发出请求前中止，修改精度无需联网");
     if (accepted)
     {
         const bool adding = scenario.command == kAddButton;
@@ -267,6 +295,9 @@ int main()
     Run({L"ABCDEF", IDOK, false}, "{}");
     Run({L"EURUSD", kUpdateButton, true, false, false}, "{}", false);
     Run({L"GBPUSD", kAddButton, true, true}, valid);
+    Scenario cancelInFlight{L"GBPUSD", kAddButton, true, true};
+    cancelInFlight.cancelInFlight = true;
+    Run(cancelInFlight, valid);
     Scenario sourceOk{L"EURUSD", IDOK, true};
     sourceOk.sourceIndex = 1;
     Run(sourceOk, R"({"code":"00000","data":[{"symbol":"EURUSD","bid1":"1.1","ask1":"1.2"}]})");

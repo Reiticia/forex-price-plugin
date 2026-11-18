@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Config.h"
+#include "RequestControl.h"
+#include <memory>
 
 #include <Windows.h>
 
@@ -45,6 +47,7 @@ private:
     Settings draft_;
     IHttpTransport& transport_;
     std::future<std::string> validation_;
+    std::shared_ptr<RequestControl> request_;
     SymbolConfig pendingSymbol_;
     PendingAction pendingAction_{PendingAction::Add};
     int pendingSelection_{-1};

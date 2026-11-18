@@ -22,12 +22,15 @@
 | --- | --- | --- |
 | `FxPriceTests` | 否 | 解析、格式化、配置及传输抽象 |
 | `FxPricePluginSmoke` | 否 | DLL、API v8 显示项 |
+| `FxPriceRuntimeTests` | 仅本机 | 不可变指针并发、旧 generation 拒绝、本机阻塞 TLS 取消/总超时、Pro 共用预算及配置取消 |
+| `FxPriceControlledUnload` | 否 | 延迟模拟传输的测试 DLL，反复加载/卸载及请求中卸载，不受周末影响 |
+| `FxPriceLifecycleTests` | 可能 | 真实 DLL 反复加载/卸载及请求中释放宿主引用；不依赖请求成功 |
 | `FxPriceOptionsTests` | 否 | 注入模拟传输，验证 Win32 添加、替换、直接保存及取消流程 |
 | `FxPriceLiveSmoke` | 是 | 真实 biquote 请求 |
 | `FxPricePluginLiveSmoke` | 是 | 加载 DLL 端到端刷新 |
 | `FxPriceOptionsPreview` | 交互 | 打开 Win32 配置窗口进行人工验收 |
 
-默认 CTest 不执行联网测试（`FxPriceLiveSmoke` 与 `FxPricePluginLiveSmoke` 需手动运行），避免网络波动造成误报。
+默认 CTest 不依赖外部行情成功；`FxPriceLifecycleTests` 在工作日可能发起一次实际请求，只验证模块最终安全卸载（请求预算 20 秒，测试上限 35 秒）。真实报价成功测试 `FxPriceLiveSmoke` 与 `FxPricePluginLiveSmoke` 需手动运行。
 
 ## 3. 构建与离线测试
 
@@ -47,7 +50,9 @@ cmake --build --preset win32-release
 ctest --preset win32-release
 ```
 
-三个离线测试（`FxPriceTests`、`FxPriceOptionsTests`、`FxPricePluginSmoke`）都应显示 `Passed`。配置窗口测试自动打开并关闭窗口，不访问网络。
+六个 CTest 均应显示 `Passed`。配置窗口测试自动打开并关闭窗口，注入传输而不访问外部网络。
+Runtime 测试使用临时本机 TCP 监听模拟不响应的 TLS 对端，验证进行中的 WinHTTP 在取消/截止时间后退出并排空回调。
+ControlledUnload 使用仅测试构建的 DLL 模拟慢请求；生产 DLL 无测试导出。
 
 ## 4. 解析测试范围
 
@@ -163,7 +168,7 @@ TMPluginGetInstance
    恢复时确认下次 `DataRequired` 自动抓取并移除暂停提示；保持 UTC 时刻不变并切换电脑时区，暂停判断应保持一致。周末前已发出的请求允许正常完成；测试结束后恢复系统时间和时区。
 8. 断网后确认显示 `--`，工具提示包含 biquote 网络错误。
 9. 输入格式合法但不存在的 `ABCDEF`，分别点击“添加新标的”、“更新选中项”和直接点击“确定”，确认均提示校验失败、列表及持久化配置不变；断网或接口无有效报价时同样拒绝。恢复网络后用有效标的重试，确认可添加并保存。
-10. 查询期间确认窗口仍响应，重复点击不能绕过校验；点击取消或关闭时提示等待查询结束，随后关闭且不保存。仅修改原标的精度时，离线也应可保存。
+10. 查询期间确认窗口仍响应，重复点击不能绕过校验；点击取消或关闭时主动中止请求，安全收尾后关闭且不保存。仅修改原标的精度时，离线也应可保存。
 
 ### 任务栏右侧留白回归
 
