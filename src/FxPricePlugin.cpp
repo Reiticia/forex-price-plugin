@@ -41,41 +41,20 @@ Settings NormalizeSettings(Settings settings)
     return settings;
 }
 
-std::wstring SampleNumber(int precision)
-{
-    const int effective = std::clamp(precision >= 0 ? precision : 5, 0, 10);
-    std::wstring result = L"88888";
-    if (effective > 0)
-    {
-        result += L'.';
-        result.append(static_cast<std::size_t>(effective), L'8');
-    }
-    return result;
-}
-
-// 汇总行示例文本：主价格精度随配置，按勾选预留日涨跌幅宽度。
-std::wstring SummarySample(const DisplayOptions& options, int precision)
-{
-    std::wstring result;
-    if (options.showMid || options.showBid || options.showAsk)
-        result = SampleNumber(precision);
-    if (options.showChange)
-    {
-        if (!result.empty()) result += L' ';
-        result += L"+888.88%";
-    }
-    return result;
-}
 } // namespace
 
 int PriceItem::GetItemWidthEx(void* hdc) const
 {
     if (!customDraw_ || !hdc) return 0;
     const std::wstring sample = label_ + sample_;
-    SIZE size{};
-    return GetTextExtentPoint32W(static_cast<HDC>(hdc), sample.c_str(),
-                                 static_cast<int>(sample.size()), &size)
-        ? size.cx : 0;
+    SIZE size{}, actualSize{};
+    if (!GetTextExtentPoint32W(static_cast<HDC>(hdc), sample.c_str(),
+                               static_cast<int>(sample.size()), &size)) return 0;
+    // 布局重新测量时，异常大价格/涨跌也不能比已知实际文本窄。
+    const std::wstring actual = label_ + value_;
+    GetTextExtentPoint32W(static_cast<HDC>(hdc), actual.c_str(),
+                          static_cast<int>(actual.size()), &actualSize);
+    return (std::max)(size.cx, actualSize.cx);
 }
 
 void PriceItem::DrawItem(void* hdc, int x, int y, int width, int height, bool)
@@ -123,7 +102,7 @@ FxPricePlugin::FxPricePlugin()
     items_[0].id_ = L"FxPriceSummary";
     items_[0].name_ = L"外汇行情汇总";
     items_[0].label_ = L"外汇: ";
-    items_[0].sample_ = L"EURUSD.s 88888.88888";
+    items_[0].sample_ = L"EURUSD.s 8.88888";
     for (std::size_t index = 0; index < kMaxSymbols; ++index)
     {
         items_[index + 1].id_ = L"FxPriceItem" + std::to_wstring(index);
@@ -263,7 +242,8 @@ void FxPricePlugin::ApplySettings(Settings settings)
             item.value_ = L"--";
             item.summary_ = L"--";
             item.sample_ = FormatQuoteSample(settings_.display,
-                                             settings_.symbols[index].precision);
+                                             settings_.symbols[index].precision,
+                                             settings_.symbols[index].code);
             if (item.sample_.empty()) item.sample_ = L"--";
             item.detail_ = L"等待行情";
         }
@@ -430,8 +410,9 @@ void FxPricePlugin::RebuildAggregateAndTooltip()
             aggregate.sample_ += L" | ";
         }
         aggregate.value_ += display + L" " + item.summary_;
-        std::wstring sample = SummarySample(settings_.display,
-                                            settings_.symbols[index].precision);
+        std::wstring sample = FormatQuoteSummarySample(settings_.display,
+                                            settings_.symbols[index].precision,
+                                            settings_.symbols[index].code);
         if (sample.empty()) sample = L"--";
         aggregate.sample_ += display + L" " + sample;
         // Keep the selected bid/ask/mid/change fields, but don't repeat the

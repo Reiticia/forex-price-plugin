@@ -32,6 +32,9 @@ std::wstring FormatQuoteValue(const Quote& quote, const DisplayOptions& options,
 std::wstring FormatQuoteSummary(const Quote& quote, const DisplayOptions& options, int precision);
 // 工具提示详细文本：完整中文标签，竖线分隔，仅包含勾选字段。
 std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options, int precision);
-// 按勾选字段生成带占位值的示例文本（用于设置界面预览）。
-std::wstring FormatQuoteSample(const DisplayOptions& options, int precision);
+// 按标的量级及配置精度生成稳定宽度样本，不按每次价格跳动改变宽度。
+std::wstring FormatQuoteSample(const DisplayOptions& options, int precision,
+                               const std::wstring& symbol = L"EURUSD");
+std::wstring FormatQuoteSummarySample(const DisplayOptions& options, int precision,
+                                      const std::wstring& symbol = L"EURUSD");
 } // namespace fxprice

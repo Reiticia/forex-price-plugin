@@ -90,10 +90,30 @@ std::wstring FormatPercentage(const std::optional<double>& value)
     return stream.str();
 }
 
-std::wstring FormatSampleNumber(int precision)
+std::wstring FormatSampleNumber(int precision, const std::wstring& symbol)
 {
-    const int effective = std::clamp(precision >= 0 ? precision : 5, 0, 10);
-    std::wstring result = L"88888";
+    const std::wstring code = NormalizeSymbol(symbol);
+    const bool yen = code.size() == 6 && code.substr(3) == L"JPY";
+    const bool gold = code.size() == 6 && (code.substr(0, 3) == L"XAU" ||
+                                          code.substr(0, 3) == L"XPT" ||
+                                          code.substr(0, 3) == L"XPD");
+    const bool silver = code.size() == 6 && code.substr(0, 3) == L"XAG";
+    const int automatic = (gold || silver) ? 2 : (yen ? 3 : 5);
+    const int effective = std::clamp(precision >= 0 ? precision : automatic, 0, 10);
+    // 宿主通常只在布局变化时测量，必须在首次报价前就给出合理量级。
+    const std::wstring quoteCurrency = code.size() == 6 ? code.substr(3) : L"";
+    const bool threeDigits = yen || silver || quoteCurrency == L"HUF" ||
+                             quoteCurrency == L"PKR";
+    const bool twoDigits = quoteCurrency == L"CNH" || quoteCurrency == L"CNY" ||
+                           quoteCurrency == L"HKD" || quoteCurrency == L"NOK" ||
+                           quoteCurrency == L"SEK" || quoteCurrency == L"ZAR" ||
+                           quoteCurrency == L"MXN" || quoteCurrency == L"TRY" ||
+                           quoteCurrency == L"CZK" || quoteCurrency == L"THB" ||
+                           quoteCurrency == L"INR";
+    const bool fiveDigits = quoteCurrency == L"IDR" || quoteCurrency == L"VND";
+    const bool fourDigits = gold || quoteCurrency == L"KRW" || quoteCurrency == L"CLP";
+    const int integerDigits = fiveDigits ? 5 : (fourDigits ? 4 : (threeDigits ? 3 : (twoDigits ? 2 : 1)));
+    std::wstring result(integerDigits, L'8');
     if (effective > 0)
     {
         result += L'.';
@@ -171,15 +191,30 @@ std::wstring FormatQuoteDetail(const Quote& quote, const DisplayOptions& options
     return result;
 }
 
-std::wstring FormatQuoteSample(const DisplayOptions& options, int precision)
+std::wstring FormatQuoteSample(const DisplayOptions& options, int precision,
+                               const std::wstring& symbol)
 {
-    const std::wstring placeholder = FormatSampleNumber(precision);
+    const std::wstring placeholder = FormatSampleNumber(precision, symbol);
     std::wstring result;
     bool first = true;
     ValueBuilder::Append(result, first, options.showBid, L"◀", placeholder);
     ValueBuilder::Append(result, first, options.showAsk, L"▶", placeholder);
     ValueBuilder::Append(result, first, options.showMid, L"≈", placeholder);
-    ValueBuilder::Append(result, first, options.showChange, L"Δ", L"+888.88%");
+    ValueBuilder::Append(result, first, options.showChange, L"Δ", L"+88.88%");
+    return result;
+}
+
+std::wstring FormatQuoteSummarySample(const DisplayOptions& options, int precision,
+                                      const std::wstring& symbol)
+{
+    std::wstring result;
+    if (options.showMid || options.showBid || options.showAsk)
+        result = FormatSampleNumber(precision, symbol);
+    if (options.showChange)
+    {
+        if (!result.empty()) result += L' ';
+        result += L"+88.88%";
+    }
     return result;
 }
 } // namespace fxprice

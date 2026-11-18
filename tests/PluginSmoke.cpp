@@ -29,6 +29,10 @@ int wmain(int argumentCount, wchar_t* arguments[])
                  plugin->GetItem(0) && plugin->GetItem(1) &&
                  std::wcscmp(plugin->GetItem(1)->GetItemLableText(), L"EURUSD.s: ") == 0 &&
                  plugin->GetItem(1)->IsCustomDraw() &&
+                 std::wcscmp(plugin->GetItem(1)->GetItemValueSampleText(),
+                              L"◀8.88888 ▶8.88888 ≈8.88888 Δ+88.88%") == 0 &&
+                 std::wcscmp(plugin->GetItem(0)->GetItemValueSampleText(),
+                              L"EURUSD.s 8.88888 +88.88%") == 0 &&
                  plugin->GetTooltipInfo() &&
                  std::wcslen(plugin->GetTooltipInfo()) <= fxprice::kMaxTooltipLength;
     if (!FreeLibrary(module)) valid = false;

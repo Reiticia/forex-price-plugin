@@ -154,7 +154,7 @@ int main()
               L"1.15826 -0.61%",
           "格式化汇总行情及日涨跌幅");
     Check(fxprice::FormatQuoteSample(displayAll, 5) ==
-              L"◀88888.88888 ▶88888.88888 ≈88888.88888 Δ+888.88%",
+              L"◀8.88888 ▶8.88888 ≈8.88888 Δ+88.88%",
           "完整宽度示例使用与任务栏一致的符号");
     Check(fxprice::FormatQuoteDetail(quotes["EURUSD"], displayAll, -1) ==
               L"Euro vs US Dollar | 买一 1.15823 | 卖一 1.15829 | 中间价 1.15826 | 日涨跌 -0.61%",
@@ -182,10 +182,25 @@ int main()
 
     Check(fxprice::FormatQuoteSummary(quotes["EURUSD"], bidOnly, 3) == L"1.158",
           "关闭涨跌幅后汇总仅显示价格");
-    Check(fxprice::FormatQuoteSample(partial, 2) == L"≈88888.88 Δ+888.88%",
+    Check(fxprice::FormatQuoteSample(partial, 2) == L"≈8.88 Δ+88.88%",
           "示例为涨跌幅预留宽度");
-    Check(fxprice::FormatQuoteSample(bidOnly, 3) == L"◀88888.888",
+    Check(fxprice::FormatQuoteSample(bidOnly, 3) == L"◀8.888",
           "关闭涨跌幅后示例不预留百分比");
+
+    Check(fxprice::FormatQuoteSample(bidOnly, -1, L"USDJPY") == L"◀888.888",
+          "日元对自动宽度预留三位整数及三位小数");
+    Check(fxprice::FormatQuoteSample(bidOnly, -1, L"XAUUSD") == L"◀8888.88" &&
+              fxprice::FormatQuoteSample(bidOnly, 5, L"XAUUSD") == L"◀8888.88888",
+          "黄金量级与显式配置精度分别生效");
+    Check(fxprice::FormatQuoteSample(bidOnly, 0, L"EURUSD") == L"◀8" &&
+              fxprice::FormatQuoteSample(bidOnly, 10, L"EURUSD") == L"◀8.8888888888",
+          "紧凑样本支持 0 到 10 位固定精度");
+    Check(fxprice::FormatQuoteSample(bidOnly, -1, L"USDTRY") == L"◀88.88888" &&
+              fxprice::FormatQuoteSample(bidOnly, -1, L"USDIDR") == L"◀88888.88888",
+          "较大数值货币对不能统一按一位整数预留");
+    Check(fxprice::FormatQuoteSummarySample(displayAll, -1, L"EURUSD") == L"8.88888 +88.88%" &&
+              fxprice::FormatQuoteSummarySample(bidOnly, -1, L"USDJPY") == L"888.888",
+          "汇总项沿用标的量级与字段开关，不再全局预留五位整数");
 
     fxprice::DisplayOptions changeOnly;
     changeOnly.showBid = false;
@@ -206,7 +221,7 @@ int main()
     Check(fxprice::FormatQuoteValue(changeQuote, changeOnly, -1) == L"Δ--" &&
               fxprice::FormatQuoteSummary(changeQuote, changeOnly, -1) == L"--",
           "缺少涨跌幅时显示占位符");
-    Check(fxprice::FormatQuoteSample(changeOnly, -1) == L"Δ+888.88%",
+    Check(fxprice::FormatQuoteSample(changeOnly, -1) == L"Δ+88.88%",
           "仅显示涨跌幅时示例无多余空格");
 
     // 详情尾部悬空分隔：全部取消勾选时为空，仅显示买价时以买价结尾。
